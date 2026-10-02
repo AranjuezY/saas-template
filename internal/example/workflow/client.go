@@ -30,56 +30,57 @@ func NewClient(c client.Client, waitTimeout time.Duration) *Client {
 
 // CreateItem 落库并拉起该条目的生命周期流程，返回完整记录。
 // 调用方会阻塞到短 workflow 完成（生命周期流程继续在后台跑）。
-func (cl *Client) CreateItem(ctx context.Context, in itemport.Item) (itemport.Item, error) {
+// 输入解包为快照再进 workflow——跨进程传递的是当时的值，不是引用。
+func (cl *Client) CreateItem(ctx context.Context, in itemport.CreateItemInput) (itemport.CreateItemOutput, error) {
 	ctx, cancel := context.WithTimeout(ctx, cl.wait)
 	defer cancel()
 
-	run, err := cl.c.ExecuteWorkflow(ctx, cl.startOptions(), contract.WorkflowTypeCreate, in)
+	run, err := cl.c.ExecuteWorkflow(ctx, cl.startOptions(), contract.WorkflowTypeCreate, in.Item)
 	if err != nil {
-		return itemport.Item{}, fmt.Errorf("start %s: %w", contract.WorkflowTypeCreate, err)
+		return itemport.CreateItemOutput{}, fmt.Errorf("start %s: %w", contract.WorkflowTypeCreate, err)
 	}
 	var created itemport.Item
 	if err := run.Get(ctx, &created); err != nil {
-		return itemport.Item{}, fmt.Errorf("run %s: %w", contract.WorkflowTypeCreate, err)
+		return itemport.CreateItemOutput{}, fmt.Errorf("run %s: %w", contract.WorkflowTypeCreate, err)
 	}
-	return created, nil
+	return itemport.CreateItemOutput{Item: created}, nil
 }
 
 // AdvanceStage 把阶段流转翻译成对流程实例的信号。
 //
-// currentStage 是数据库里的当前阶段：当目标流程从未启动（历史数据、
+// in.CurrentStage 是数据库里的当前阶段：当目标流程从未启动（历史数据、
 // SignalWithStart 自动拉起）时作为新实例的初始阶段。
 // 目标为终态时自动改发 archive 信号——activate 不会接受终态值。
-func (cl *Client) AdvanceStage(ctx context.Context, id int64, currentStage, nextStage string) error {
-	signal, ok := signalForStage(nextStage)
+func (cl *Client) AdvanceStage(ctx context.Context, in itemport.AdvanceStageInput) error {
+	signal, ok := signalForStage(in.NextStage)
 	if !ok {
-		return fmt.Errorf("unknown stage %q", nextStage)
+		return fmt.Errorf("unknown stage %q", in.NextStage)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, cl.wait)
 	defer cancel()
 
 	_, err := cl.c.SignalWithStartWorkflow(ctx,
-		contract.ItemWorkflowID(id),
+		contract.ItemWorkflowID(in.ID),
 		signal,
 		"",
 		cl.startOptions(),
-		contract.WorkflowTypeItem, id, currentStage,
+		contract.WorkflowTypeItem, in.ID, in.CurrentStage,
 	)
 	if err != nil {
-		return fmt.Errorf("signal %s for item %d: %w", signal, id, err)
+		return fmt.Errorf("signal %s for item %d: %w", signal, in.ID, err)
 	}
 	// 信号已送达：阶段落库由 workflow 内的 activity 异步完成，
 	// handler 随后短轮询数据库直至阶段可见。
 	return nil
 }
 
-// CancelItem 走合规的取消流程：删除记录 + 取消生命周期实例。
-func (cl *Client) CancelItem(ctx context.Context, id int64, reason string) error {
+// DeleteItem 走合规的取消流程（删除的合规形态）：删除记录 + 取消生命周期实例。
+func (cl *Client) DeleteItem(ctx context.Context, in itemport.DeleteItemInput) error {
 	ctx, cancel := context.WithTimeout(ctx, cl.wait)
 	defer cancel()
 
-	run, err := cl.c.ExecuteWorkflow(ctx, cl.startOptions(), contract.WorkflowTypeCancel, id, reason)
+	run, err := cl.c.ExecuteWorkflow(ctx, cl.startOptions(), contract.WorkflowTypeCancel, in.ID, in.Reason)
 	if err != nil {
 		return fmt.Errorf("start %s: %w", contract.WorkflowTypeCancel, err)
 	}

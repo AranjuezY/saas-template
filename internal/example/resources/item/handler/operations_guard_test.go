@@ -23,7 +23,7 @@ func TestLifecycleOperationsRegistered(t *testing.T) {
 
 		for _, k := range op.Kinds {
 			switch k {
-			case itemport.OpWrite, itemport.OpLifecycle, itemport.OpEffect:
+			case itemport.OpWrite, itemport.OpLifecycle, itemport.OpSideEffect:
 			default:
 				t.Errorf("操作 %q 使用未知类别 %q", op.Name, k)
 			}

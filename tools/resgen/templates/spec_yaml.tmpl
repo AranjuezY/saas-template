@@ -1,0 +1,27 @@
+# {{.Name}} 资源规格 —— resgen 的唯一事实源（本文件手写维护）。
+# 留空的必填字段会让 go generate 失败：规格不完整即拒绝生成。
+#
+# 资源类型：bound 绑定型 / capability 能力型 / reference 参照型 / trigger 触发型 / plain 纯维护。
+# 操作 kind 三类，不再细分：write 写事实 / lifecycle 动流程 / sideeffect 外部副作用；只读操作不登记。
+resource:
+  domain: {{.Domain}}
+  name: {{.Name}}
+  type: {{.Type}}
+  table: {{.Table}}{{if not .HasStore}} # capability 类型无事实表，可删除本行{{end}}
+  # 必填：本资源对 workflow 的影响总述；纯维护资源也必须显式写明"无：……"。
+  workflow: ""
+
+# 必填：写入 / 生命周期 / 副作用操作清单（至少 1 项），逐项字段全部必填：
+#   name 操作名（PascalCase）/ kinds 类别 / workflow 对流程的影响 /
+#   idempotency 幂等规则（重试不得重复生效）/ audit 审计规则 / input 输入字段（至少 1 个）。
+operations: []
+# 参考示例：
+# - name: Create{{.NameGo}}
+#   kinds: [write]
+#   workflow: "无：纯维护资源不影响任何流程（如影响则写明如何启动/推进/结束流程）"
+#   idempotency: "重复提交如何不重复生效的保证手段"
+#   audit: "审计事实如何留存（字段 / 日志 / workflow 历史）"
+#   input:
+#     - { name: title, type: string }
+#   output:
+#     - { name: item, type: {{.NameGo}} }

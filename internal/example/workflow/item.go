@@ -17,24 +17,24 @@ import (
 func CreateItemWorkflow(ctx workflow.Context, in itemport.Item) (itemport.Item, error) {
 	ctx = resourceActivityOpts(ctx)
 
-	var created itemport.Item
-	if err := workflow.ExecuteActivity(ctx, itemActs.CreateItem, in).Get(ctx, &created); err != nil {
+	var created itemport.CreateItemOutput
+	if err := workflow.ExecuteActivity(ctx, itemActs.CreateItem, itemport.CreateItemInput{Item: in}).Get(ctx, &created); err != nil {
 		return itemport.Item{}, err
 	}
 
 	childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
-		WorkflowID: contract.ItemWorkflowID(created.ID),
+		WorkflowID: contract.ItemWorkflowID(created.Item.ID),
 		// 父流程（短命令）结束后子流程必须继续跑：
 		// Temporal 对子流程默认 ParentClosePolicy 是 Terminate，
 		// 这里必须显式 Abandon，否则生命周期流程会随创建命令一起被终止。
 		ParentClosePolicy: enums.PARENT_CLOSE_POLICY_ABANDON,
 	})
-	child := workflow.ExecuteChildWorkflow(childCtx, ItemWorkflow, created.ID, created.Stage)
+	child := workflow.ExecuteChildWorkflow(childCtx, ItemWorkflow, created.Item.ID, created.Item.Stage)
 	var childWE workflow.Execution
 	if err := child.GetChildWorkflowExecution().Get(ctx, &childWE); err != nil {
 		return itemport.Item{}, err
 	}
-	return created, nil
+	return created.Item, nil
 }
 
 // ItemWorkflow 是单个条目的生命周期流程（长时编排，骨架）。
@@ -75,23 +75,25 @@ func ItemWorkflow(ctx workflow.Context, itemID int64, initialStage string) (stri
 	selector.AddReceive(activate, func(c workflow.ReceiveChannel, _ bool) {
 		var payload string
 		c.Receive(ctx, &payload)
-		var updated itemport.Item
-		if err := workflow.ExecuteActivity(actx, itemActs.UpdateItemStage, itemID, itemport.StageActive).Get(ctx, &updated); err != nil {
+		var updated itemport.UpdateItemStageOutput
+		if err := workflow.ExecuteActivity(actx, itemActs.UpdateItemStage,
+			itemport.UpdateItemStageInput{ID: itemID, Stage: itemport.StageActive}).Get(ctx, &updated); err != nil {
 			workflow.GetLogger(ctx).Error("activate activity failed", "item_id", itemID, "err", err)
 			return
 		}
-		stage = updated.Stage
+		stage = updated.Item.Stage
 		_ = payload
 	})
 	selector.AddReceive(archive, func(c workflow.ReceiveChannel, _ bool) {
 		var payload string
 		c.Receive(ctx, &payload)
-		var updated itemport.Item
-		if err := workflow.ExecuteActivity(actx, itemActs.UpdateItemStage, itemID, itemport.StageArchived).Get(ctx, &updated); err != nil {
+		var updated itemport.UpdateItemStageOutput
+		if err := workflow.ExecuteActivity(actx, itemActs.UpdateItemStage,
+			itemport.UpdateItemStageInput{ID: itemID, Stage: itemport.StageArchived}).Get(ctx, &updated); err != nil {
 			workflow.GetLogger(ctx).Error("archive activity failed", "item_id", itemID, "err", err)
 			return
 		}
-		stage = updated.Stage
+		stage = updated.Item.Stage
 		_ = payload
 	})
 
@@ -119,5 +121,6 @@ func CancelItemWorkflow(ctx workflow.Context, itemID int64, reason string) error
 			"item_id", itemID, "reason", reason, "err", err)
 	}
 
-	return workflow.ExecuteActivity(ctx, itemActs.DeleteItem, itemID).Get(ctx, nil)
+	return workflow.ExecuteActivity(ctx, itemActs.DeleteItem,
+		itemport.DeleteItemInput{ID: itemID, Reason: reason}).Get(ctx, nil)
 }

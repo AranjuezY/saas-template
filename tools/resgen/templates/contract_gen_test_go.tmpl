@@ -1,0 +1,51 @@
+// 契约测试 —— resgen 仅首次生成本文件，之后人工维护（不会被重新生成覆盖）。
+// 初始为失败状态：把规格里的幂等 / 审计规则翻译成断言，测试变绿才算实现完成。
+// 规格后续新增操作时，参照本文件的既有测试手工补充对应用例。
+package store
+
+import (
+	"context"
+	"path/filepath"
+	"testing"
+
+	"{{.Module}}/internal/{{.Domain}}/resources/{{.Name}}/port"
+	"{{.Module}}/internal/shared/db"
+)
+
+// newContractStore 为契约测试构造被测实现（临时库 + 生成的操作接口）。
+func newContractStore(t *testing.T) port.Ops {
+	t.Helper()
+
+	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "contract.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	return New(database)
+}
+{{range .StoreOps}}
+func TestContract{{.Name}}(t *testing.T) {
+	st := newContractStore(t)
+	ctx := context.Background()
+
+	in := port.{{.InputType}}{
+		// TODO(契约): 填入合法输入。
+	}
+{{if .HasOutput}}	out, err := st.{{.Name}}(ctx, in)
+	if err != nil {
+		t.Fatalf("{{.Name}}: %v", err)
+	}
+	_ = out
+{{else}}	if err := st.{{.Name}}(ctx, in); err != nil {
+		t.Fatalf("{{.Name}}: %v", err)
+	}
+{{end}}
+	// 幂等规则（规格）：{{.Idempotency}}
+	// TODO(契约): 断言重复调用不重复生效。
+
+	// 审计规则（规格）：{{.Audit}}
+	// TODO(契约): 断言审计事实按规则留存。
+
+	t.Error("契约断言未填充：{{.Name}}（填充断言后删除本行）")
+}
+{{end}}

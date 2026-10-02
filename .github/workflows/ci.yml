@@ -15,10 +15,11 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # 1. 生成物与提交一致（templ generate 后无 diff）
-      - name: templ generate (drift check)
+      # 1. 生成物与提交一致（templ + resgen generate 后无 diff）
+      - name: generate (drift check)
         run: |
           go run github.com/a-h/templ/cmd/templ@v0.3.1020 generate
+          go generate ./...
           git diff --exit-code
 
       # 2. 依赖方向：按 .go-arch-lint.yml 检查

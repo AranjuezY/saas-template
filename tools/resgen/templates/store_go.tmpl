@@ -1,0 +1,29 @@
+// Package store 是 {{.Name}} 事实的唯一写入点：所有对 {{.Table}} 表的读写都经由此包。
+// 写调用来源：绑定型资源只应来自 activity（workflow 编排之下），其余类型为 handler 直调。
+package store
+
+import (
+	"database/sql"
+
+	"{{.Module}}/internal/{{.Domain}}/resources/{{.Name}}/port"
+)
+
+// {{.NameGo}}Store 实现 port.Ops；保持未导出，外界只依赖生成的操作接口。
+// TODO(resgen): 实现 port.Ops 的全部方法——go generate 之后编译错误会逐一提醒。
+type {{.NameGo}}Store struct {
+	db *sql.DB
+}
+
+// New 构造 {{.Name}} 的事实写入点，返回生成的操作接口。
+func New(database *sql.DB) port.Ops {
+	return &{{.NameGo}}Store{db: database}
+}
+
+// 编译期约束：未导出实现必须满足生成的操作接口。
+var _ port.Ops = (*{{.NameGo}}Store)(nil)
+
+// TODO(resgen): 规格登记的操作签名（实现于本文件）：
+{{range .StoreOps}}//	{{.SigQualified}}
+{{end}}// 以及约定读操作（见 port.Ops）：
+//	List(ctx context.Context) ([]{{.NameGo}}, error)
+//	Get(ctx context.Context, id int64) ({{.NameGo}}, error)

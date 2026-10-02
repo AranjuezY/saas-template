@@ -1,0 +1,25 @@
+package port
+
+import (
+	"errors"
+	"time"
+)
+
+// {{.NameGo}} 是一条{{.Name}}记录的快照（跨资源传递的是当时的快照，不带行为）。
+// TODO(resgen): 按业务补全字段，并实现 Normalize / Validate（参考 example 域 item）。
+type {{.NameGo}} struct {
+	ID        int64     `json:"id"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// ErrNotFound 表示目标记录不存在。
+var ErrNotFound = errors.New("{{.Name}} not found")
+
+// ValidationError 表示入参校验失败，Message 可直接展示给用户。
+type ValidationError struct {
+	Field   string
+	Message string
+}
+
+func (e ValidationError) Error() string { return e.Field + ": " + e.Message }

@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,19 +15,19 @@ import (
 )
 
 // fakeOrchestrator 用 store 直写模拟编排结果，让 handler 测试无需 Temporal Server。
-type fakeOrchestrator struct{ db *sql.DB }
+type fakeOrchestrator struct{ ops port.Ops }
 
-func (f *fakeOrchestrator) CreateItem(ctx context.Context, in port.Item) (port.Item, error) {
-	return store.New(f.db).Create(ctx, in)
+func (f *fakeOrchestrator) CreateItem(ctx context.Context, in port.CreateItemInput) (port.CreateItemOutput, error) {
+	return f.ops.CreateItem(ctx, in)
 }
 
-func (f *fakeOrchestrator) AdvanceStage(ctx context.Context, id int64, currentStage, nextStage string) error {
-	_, err := store.New(f.db).UpdateStage(ctx, id, nextStage)
+func (f *fakeOrchestrator) AdvanceStage(ctx context.Context, in port.AdvanceStageInput) error {
+	_, err := f.ops.UpdateItemStage(ctx, port.UpdateItemStageInput{ID: in.ID, Stage: in.NextStage})
 	return err
 }
 
-func (f *fakeOrchestrator) CancelItem(ctx context.Context, id int64, reason string) error {
-	return store.New(f.db).Delete(ctx, id)
+func (f *fakeOrchestrator) DeleteItem(ctx context.Context, in port.DeleteItemInput) error {
+	return f.ops.DeleteItem(ctx, in)
 }
 
 func newTestHandler(t *testing.T) http.Handler {
@@ -40,8 +39,9 @@ func newTestHandler(t *testing.T) http.Handler {
 	}
 	t.Cleanup(func() { _ = database.Close() })
 
+	ops := store.New(database)
 	mux := http.NewServeMux()
-	New(store.New(database), &fakeOrchestrator{db: database}).Register(mux)
+	New(ops, &fakeOrchestrator{ops: ops}).Register(mux)
 	return mux
 }
 

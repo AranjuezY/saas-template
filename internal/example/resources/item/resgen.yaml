@@ -1,0 +1,57 @@
+# item 资源规格 —— resgen 的唯一事实源（本文件手写维护）。
+# 留空的必填字段会让 go generate 失败：规格不完整即拒绝生成。
+#
+# 资源类型：bound 绑定型 / capability 能力型 / reference 参照型 / trigger 触发型 / plain 纯维护。
+# 操作 kind 三类，不再细分：write 写事实 / lifecycle 动流程 / sideeffect 外部副作用；只读操作不登记。
+resource:
+  domain: example
+  name: item
+  type: bound
+  table: items
+  # 对 workflow 的影响总述。
+  workflow: >-
+    绑定型资源：每个条目实体对应一个生命周期 workflow（确定性 ID item/{id}）。
+    创建与删除经短命令 workflow；阶段只能由生命周期流程内的 activity 落库，
+    页面不得直接改。
+
+# 写入 / 生命周期 / 副作用操作清单（只读操作不登记），逐项含幂等与审计规则。
+operations:
+  - name: CreateItem
+    kinds: [write, lifecycle]
+    workflow: "落库后以 item/{id} 拉起生命周期流程（Abandon 子流程），只等启动确认"
+    idempotency: "ExecuteWorkflow 是持久化启动，worker 恢复后补执行，不重复发起；落库本身产生新 ID，重复执行表现为新增而非覆盖"
+    audit: "created_at / updated_at 字段 + workflow 执行历史"
+    input:
+      - { name: item, type: Item }
+    output:
+      - { name: item, type: Item }
+
+  - name: AdvanceStage
+    kinds: [lifecycle]
+    workflow: "向 item/{id} 发 activate / archive 信号；阶段只能由流程内的 activity 落库"
+    idempotency: "信号重复送达安全：目标阶段与当前一致时 UPDATE 写相同值，不产生新事实"
+    audit: "workflow 事件历史 + updated_at"
+    input:
+      - { name: id, type: int64 }
+      - { name: current_stage, type: string }
+      - { name: next_stage, type: string }
+
+  - name: UpdateItemStage
+    kinds: [write]
+    workflow: "仅被生命周期流程的信号分支调用，是条目阶段唯一写入口；页面不得直接改"
+    idempotency: "UPDATE 到相同值幂等；目标行不存在返回 ErrNotFound，重试不重复生效"
+    audit: "updated_at 字段"
+    input:
+      - { name: id, type: int64 }
+      - { name: stage, type: string }
+    output:
+      - { name: item, type: Item }
+
+  - name: DeleteItem
+    kinds: [write, lifecycle]
+    workflow: "删除的合规形态：CancelItemWorkflow 先请求取消 item/{id} 流程再删记录，全程留审计轨迹"
+    idempotency: "二次删除返回 ErrNotFound；先取消后删除的顺序保证不留孤儿 Running 实例"
+    audit: "workflow 执行历史 + RowsAffected 检查"
+    input:
+      - { name: id, type: int64 }
+      - { name: reason, type: string }

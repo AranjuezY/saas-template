@@ -46,9 +46,9 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	in := port.Item{Title: r.FormValue("title")}
-
-	created, err := h.orch.CreateItem(ctx, in)
+	created, err := h.orch.CreateItem(ctx, port.CreateItemInput{
+		Item: port.Item{Title: r.FormValue("title")},
+	})
 	if err != nil {
 		h.writeError(w, r, err, "创建失败，请稍后重试（需确保 Temporal 与 worker 已启动）")
 		return
@@ -63,7 +63,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = view.Rows(list).Render(ctx, w)
-	view.SuccessToast(w, r, "已添加 "+created.Title+"，生命周期流程已启动")
+	view.SuccessToast(w, r, "已添加 "+created.Item.Title+"，生命周期流程已启动")
 }
 
 // updateStage 阶段流转：向该条目的流程实例发信号，随后短轮询
@@ -91,7 +91,11 @@ func (h *Handler) updateStage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.orch.AdvanceStage(ctx, id, current.Stage, next); err != nil {
+	if err := h.orch.AdvanceStage(ctx, port.AdvanceStageInput{
+		ID:           id,
+		CurrentStage: current.Stage,
+		NextStage:    next,
+	}); err != nil {
 		h.writeError(w, r, err, "更新失败，请稍后重试")
 		return
 	}
@@ -113,7 +117,7 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.orch.CancelItem(ctx, id, "deleted from ui"); err != nil {
+	if err := h.orch.DeleteItem(ctx, port.DeleteItemInput{ID: id, Reason: "deleted from ui"}); err != nil {
 		h.writeError(w, r, err, "删除失败，请稍后重试")
 		return
 	}

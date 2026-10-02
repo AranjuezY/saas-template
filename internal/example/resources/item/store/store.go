@@ -12,13 +12,18 @@ import (
 	"github.com/AranjuezY/saas-template/internal/shared/db"
 )
 
-// Store 提供 item 的数据访问。
-type Store struct {
+// itemStore 实现 port.Ops；保持未导出，外界只依赖生成的操作接口。
+type itemStore struct {
 	db *sql.DB
 }
 
-// New 基于既有连接构造 store。
-func New(database *sql.DB) *Store { return &Store{db: database} }
+// New 构造 item 的事实写入点，返回生成的操作接口。
+func New(database *sql.DB) port.Ops {
+	return &itemStore{db: database}
+}
+
+// 编译期约束：未导出实现必须满足生成的操作接口。
+var _ port.Ops = (*itemStore)(nil)
 
 const itemColumns = `id, title, stage, created_at, updated_at`
 
@@ -47,7 +52,7 @@ func notFound(err error) error {
 }
 
 // List 查询全部条目，按创建时间倒序。
-func (s *Store) List(ctx context.Context) ([]port.Item, error) {
+func (s *itemStore) List(ctx context.Context) ([]port.Item, error) {
 	rows, err := s.db.QueryContext(ctx,
 		"SELECT "+itemColumns+" FROM items ORDER BY created_at DESC, id DESC LIMIT 500")
 	if err != nil {
@@ -67,7 +72,7 @@ func (s *Store) List(ctx context.Context) ([]port.Item, error) {
 }
 
 // Get 按 ID 查询单条记录，不存在时返回 port.ErrNotFound。
-func (s *Store) Get(ctx context.Context, id int64) (port.Item, error) {
+func (s *itemStore) Get(ctx context.Context, id int64) (port.Item, error) {
 	query := "SELECT " + itemColumns + " FROM items WHERE id = ?"
 	i, err := scanItem(s.db.QueryRowContext(ctx, query, id))
 	if err != nil {
@@ -76,47 +81,57 @@ func (s *Store) Get(ctx context.Context, id int64) (port.Item, error) {
 	return i, nil
 }
 
-// Create 插入一条记录并返回落库后的完整数据。
-func (s *Store) Create(ctx context.Context, in port.Item) (port.Item, error) {
-	in.Normalize()
-	if err := in.Validate(); err != nil {
-		return port.Item{}, err
+// CreateItem 插入一条记录并返回落库后的完整数据。
+// 幂等与审计规则见 resgen.yaml（CreateItem）。
+func (s *itemStore) CreateItem(ctx context.Context, in port.CreateItemInput) (port.CreateItemOutput, error) {
+	item := in.Item
+	item.Normalize()
+	if err := item.Validate(); err != nil {
+		return port.CreateItemOutput{}, err
 	}
 
 	now := db.Now()
 	const insert = `INSERT INTO items (title, stage, created_at, updated_at) VALUES (?, ?, ?, ?)`
-	res, err := s.db.ExecContext(ctx, insert, in.Title, in.Stage, now, now)
+	res, err := s.db.ExecContext(ctx, insert, item.Title, item.Stage, now, now)
 	if err != nil {
-		return port.Item{}, fmt.Errorf("create item: %w", err)
+		return port.CreateItemOutput{}, fmt.Errorf("create item: %w", err)
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		return port.Item{}, fmt.Errorf("last insert id: %w", err)
+		return port.CreateItemOutput{}, fmt.Errorf("last insert id: %w", err)
 	}
-	return s.Get(ctx, id)
+	created, err := s.Get(ctx, id)
+	if err != nil {
+		return port.CreateItemOutput{}, err
+	}
+	return port.CreateItemOutput{Item: created}, nil
 }
 
-// UpdateStage 更新条目阶段（只应被 workflow 的信号分支经 activity 调用）。
-func (s *Store) UpdateStage(ctx context.Context, id int64, stage string) (port.Item, error) {
-	if !port.IsValidStage(stage) {
-		return port.Item{}, port.ValidationError{Field: "stage", Message: "未知的阶段"}
+// UpdateItemStage 更新条目阶段（只应被 workflow 的信号分支经 activity 调用）。
+func (s *itemStore) UpdateItemStage(ctx context.Context, in port.UpdateItemStageInput) (port.UpdateItemStageOutput, error) {
+	if !port.IsValidStage(in.Stage) {
+		return port.UpdateItemStageOutput{}, port.ValidationError{Field: "stage", Message: "未知的阶段"}
 	}
 	const update = `UPDATE items SET stage = ?, updated_at = ? WHERE id = ?`
-	res, err := s.db.ExecContext(ctx, update, stage, db.Now(), id)
+	res, err := s.db.ExecContext(ctx, update, in.Stage, db.Now(), in.ID)
 	if err != nil {
-		return port.Item{}, fmt.Errorf("update stage: %w", err)
+		return port.UpdateItemStageOutput{}, fmt.Errorf("update stage: %w", err)
 	}
 	if n, err := res.RowsAffected(); err != nil {
-		return port.Item{}, fmt.Errorf("update stage rows: %w", err)
+		return port.UpdateItemStageOutput{}, fmt.Errorf("update stage rows: %w", err)
 	} else if n == 0 {
-		return port.Item{}, port.ErrNotFound
+		return port.UpdateItemStageOutput{}, port.ErrNotFound
 	}
-	return s.Get(ctx, id)
+	item, err := s.Get(ctx, in.ID)
+	if err != nil {
+		return port.UpdateItemStageOutput{}, err
+	}
+	return port.UpdateItemStageOutput{Item: item}, nil
 }
 
-// Delete 删除条目记录（只应被 CancelItemWorkflow 的收尾 activity 调用）。
-func (s *Store) Delete(ctx context.Context, id int64) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM items WHERE id = ?`, id)
+// DeleteItem 删除条目记录（只应被 CancelItemWorkflow 的收尾 activity 调用）。
+func (s *itemStore) DeleteItem(ctx context.Context, in port.DeleteItemInput) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM items WHERE id = ?`, in.ID)
 	if err != nil {
 		return fmt.Errorf("delete item: %w", err)
 	}

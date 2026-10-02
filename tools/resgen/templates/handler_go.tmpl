@@ -1,0 +1,34 @@
+// Package handler 是 {{.Name}} 资源的 HTTP 处理层。
+{{if .Orchestrated}}//
+// 写路径经 Orchestrator 进入编排（接口由 resgen 生成于 orchestrator_gen.go，
+// 生产实现是域 workflow 客户端，测试用假实现直写 store）。
+{{end}}package handler
+
+import (
+	"net/http"
+
+	"{{.Module}}/internal/{{.Domain}}/resources/{{.Name}}/port"
+)
+
+// Handler 聚合依赖，所有 handler 都是它的方法。
+type Handler struct {
+	ops port.Ops{{if .Orchestrated}}
+	orch Orchestrator{{end}}
+}
+{{if .Orchestrated}}
+// New 构造 handler；生产编排实现是域 workflow 客户端。
+func New(ops port.Ops, orch Orchestrator) *Handler {
+	return &Handler{ops: ops, orch: orch}
+}
+{{else}}
+// New 构造 handler（无编排类型：写路径直调 store）。
+func New(ops port.Ops) *Handler {
+	return &Handler{ops: ops}
+}
+{{end}}
+// Register 把 {{.Name}} 路由挂到 mux。TODO(resgen): 按对外入口补全。
+func (h *Handler) Register(mux *http.ServeMux) {
+	_ = h.ops
+	// mux.HandleFunc("GET /{{.Table}}", h.list)
+	// mux.HandleFunc("POST /{{.Table}}", h.create)
+}

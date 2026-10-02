@@ -31,6 +31,12 @@ internal/<域>/
 - 非绑定资源**没有** activity 子包，handler 直调 store——差别只在于选用了哪几个部分。
 - 判断一个资源是否绑定，看 port 里有没有编排契约、目录里有没有 activity。
 - 共享基础件只有三个：`internal/shared/{db,ui,temporalclient}`，不承载业务。
+- 骨架与代码契约由 `tools/resgen` 从规格（资源根 `resgen.yaml`）生成：
+  `resgen resource add <域>/<资源> --type <类型>` 建目录骨架，`go generate ./...`
+  生成 `ops_gen.go`（操作接口 + 输入输出类型 + 操作描述表）、
+  Orchestrator 接口、activity 包装（仅 bound）与契约测试骨架（初始为红，
+  填断言变绿才算实现完成）。规格留空必填字段即拒绝生成。
+  `*_gen.go` 不得手改（重生成会覆盖）；`contract_gen_test.go` 仅首次生成，之后人工维护。
 
 ## 4. 判断规则
 
@@ -53,7 +59,9 @@ internal/<域>/
 5. 跨资源传递的是当时的快照，而不是实时引用。
 6. **操作登记先于实现**：写入、生命周期与副作用类操作必须在 port 的
    `Operations` 清单声明（handler 有守卫测试：编排入口不登记即失败）。
-7. 生成物 `*_templ.go` 必须与 `.templ` 同提交（CI 用 `git diff --exit-code` 检查）。
+   清单由 resgen 从规格生成——改清单 = 改 `resgen.yaml` 后 `go generate`。
+7. 生成物 `*_templ.go` 必须与 `.templ` 同提交，`*_gen.go` 必须与规格同步
+   （CI 用 `go generate ./...` + `git diff --exit-code` 检查）。
 
 ## 6. 已知陷阱（都踩过，别再踩）
 
