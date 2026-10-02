@@ -1,0 +1,126 @@
+package view
+
+import (
+	"strconv"
+
+	"github.com/AranjuezY/saas-template/internal/example/resources/item/port"
+	"github.com/AranjuezY/saas-template/internal/shared/ui"
+)
+
+// Page 是条目列表的完整页面（view 自带整页；无跨资源组装时不需要 pages 层）。
+templ Page(list []port.Item) {
+	@ui.Base("Items · saas-template") {
+		<main class="mx-auto w-full max-w-4xl px-4 py-8">
+			<h1 class="text-2xl font-bold">Items</h1>
+			<p class="mt-1 text-sm opacity-60">saas-template 示例域：item 生命周期</p>
+			<div class="mt-6 grid items-start gap-6 md:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
+				@Form()
+				@ui.Card("") {
+					<div class="overflow-x-auto">
+						<table class="w-full text-sm">
+							<thead>
+								<tr class="text-left text-xs uppercase opacity-50">
+									<th class="py-1">标题</th>
+									<th>阶段</th>
+									<th>创建时间</th>
+									<th class="text-right">操作</th>
+								</tr>
+							</thead>
+							<tbody id="item-rows">
+								@Rows(list)
+							</tbody>
+						</table>
+					</div>
+				}
+			</div>
+		</main>
+	}
+}
+
+// Rows 是列表片段：整页与 htmx 局部刷新共用（双用途片段）。
+templ Rows(list []port.Item) {
+	if len(list) == 0 {
+		<tr>
+			<td colspan="4">
+				@ui.EmptyState("还没有条目", "在左侧添加一个")
+			</td>
+		</tr>
+	} else {
+		for _, i := range list {
+			@Row(i)
+		}
+	}
+}
+
+// Row 单行条目记录。阶段变更与删除在服务端分别映射为
+// "向流程实例发信号"和"取消流程"，不会绕过 Temporal 直接写库。
+templ Row(i port.Item) {
+	<tr id={ "item-" + strconv.FormatInt(i.ID, 10) } class="border-t border-neutral-100">
+		<td class="py-2 font-medium">{ i.Title }</td>
+		<td>
+			<form
+				hx-patch={ "/items/" + strconv.FormatInt(i.ID, 10) + "/stage" }
+				hx-target="closest tr"
+				hx-swap="outerHTML"
+				hx-trigger="change"
+			>
+				<select class="rounded border border-neutral-300 px-1 py-0.5 text-xs" name="stage" aria-label="更新阶段">
+					for _, s := range StageOptions() {
+						<option value={ s } selected?={ s == i.Stage }>{ StageLabel(s) }</option>
+					}
+				</select>
+			</form>
+		</td>
+		<td class="whitespace-nowrap text-xs opacity-70">{ ui.FormatTime(i.CreatedAt) }</td>
+		<td class="text-right">
+			<button
+				class="text-xs text-red-600 hover:underline"
+				type="button"
+				hx-delete={ "/items/" + strconv.FormatInt(i.ID, 10) }
+				hx-target="closest tr"
+				hx-swap="outerHTML swap:150ms"
+				hx-confirm={ "确定删除 " + i.Title + " 吗？（将同时取消其生命周期流程）" }
+			>
+				删除
+			</button>
+		</td>
+	</tr>
+}
+
+// NotFoundPage 404 页面。
+templ NotFoundPage() {
+	@ui.Base("页面不存在 · saas-template") {
+		<div class="flex flex-col items-center gap-3 py-24 text-center">
+			<p class="text-5xl font-bold opacity-20">404</p>
+			<p class="font-medium">找不到这个页面</p>
+			<a class="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white hover:bg-neutral-700" href="/">回到列表</a>
+		</div>
+	}
+}
+
+// Form 新增条目表单，通过 htmx 提交。
+templ Form() {
+	@ui.Card("新增条目") {
+		<form
+			id="create-form"
+			class="flex flex-col gap-3"
+			hx-post="/items"
+			hx-target="#item-rows"
+			hx-swap="innerHTML"
+			hx-indicator="#create-spinner"
+			data-reset-on-success
+		>
+			<label class="flex flex-col gap-1">
+				<span class="text-xs font-medium opacity-70">标题 <span class="text-red-500">*</span></span>
+				<input class="w-full rounded border border-neutral-300 px-2 py-1 text-sm" type="text" name="title" required maxlength="128" placeholder="做什么"/>
+			</label>
+			<div class="flex items-center gap-2">
+				<button class="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white hover:bg-neutral-700" type="submit">
+					@ui.Spinner("create-spinner")
+					添加
+				</button>
+				<button class="text-sm opacity-60 hover:opacity-100" type="reset">清空</button>
+			</div>
+		</form>
+	}
+}

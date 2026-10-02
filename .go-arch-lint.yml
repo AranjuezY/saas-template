@@ -1,0 +1,58 @@
+# 依赖方向规则：域内分层 + 共享基础件，违反即 CI 失败。
+# 通配符按域匹配（internal/*/…），新增域无需改本文件。
+version: 3
+workdir: .
+
+allow:
+  # 外部库（templ/temporal/sqlite 等）不在管制范围，只管内部依赖方向
+  depOnAnyVendor: true
+
+exclude: [node_modules, bin, data]
+
+# 测试文件只做装配（打开测试库、构造假实现），不改变生产依赖方向
+excludeFiles: ["^.*_test\\.go$"]
+
+components:
+  # 装配根
+  cmd:            { in: cmd/* }
+  # 域级契约（workflow 类型名/信号/ID 规则/队列）——公共，人人可依赖
+  contract:       { in: internal/*/contract }
+  # 域级 workflow：定义 + 发起侧客户端
+  workflow:       { in: internal/*/workflow }
+  # 资源切片（按角色分子包）
+  port:           { in: internal/*/resources/*/port }
+  store:          { in: internal/*/resources/*/store }
+  activity:       { in: internal/*/resources/*/activity }
+  handler:        { in: internal/*/resources/*/handler }
+  view:           { in: internal/*/resources/*/view }
+  # 共享基础件
+  db:             { in: internal/shared/db }
+  ui:             { in: internal/shared/ui }
+  temporalclient: { in: internal/shared/temporalclient }
+
+commonComponents: [contract, port]
+
+deps:
+  # 装配根组合一切
+  cmd:
+    anyProjectDeps: true
+
+  # handler：读直连 store，写经 workflow 客户端（编排入口）
+  handler:
+    mayDependOn: [store, view, workflow]
+
+  # workflow：只依赖 activity 符号（+ 公共的 contract/port）
+  workflow:
+    mayDependOn: [activity]
+
+  # activity 是编排副作用的唯一入口，落库经 store
+  activity:
+    mayDependOn: [store]
+
+  # store 是事实唯一写入点，只有它碰 db
+  store:
+    mayDependOn: [db]
+
+  # view 只用共享渲染原语
+  view:
+    mayDependOn: [ui]

@@ -1,0 +1,48 @@
+package ui
+
+// Base 是整站 HTML 骨架。派生项目可在此挂自己的静态资源与脚本。
+templ Base(title string) {
+	<!DOCTYPE html>
+	<html lang="zh-CN">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ title }</title>
+		</head>
+		<body class="min-h-screen bg-neutral-50 text-neutral-900 antialiased">
+			{ children... }
+			<!-- htmx 通过 hx-swap-oob="beforeend:#toasts" 往这里塞提示 -->
+			<div id="toasts" class="fixed bottom-4 right-4 flex flex-col gap-2"></div>
+		</body>
+	</html>
+}
+
+// Card 通用内容卡片。
+templ Card(title string) {
+	<section class="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+		if title != "" {
+			<h2 class="mb-3 text-base font-semibold">{ title }</h2>
+		}
+		{ children... }
+	</section>
+}
+
+// Toast 是 out-of-band 提示块。
+templ Toast(kind string, message string) {
+	<div class={ ToastClass(kind) } hx-swap-oob="beforeend:#toasts" role="status" data-toast>
+		<span class="text-sm font-medium">{ message }</span>
+	</div>
+}
+
+// Spinner 供 hx-indicator 使用。
+templ Spinner(id string) {
+	<span id={ id } class="htmx-indicator inline-block size-3 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-600"></span>
+}
+
+// EmptyState 空数据占位。
+templ EmptyState(title string, hint string) {
+	<div class="flex flex-col items-center gap-2 py-14 text-center">
+		<p class="font-medium">{ title }</p>
+		<p class="text-sm opacity-70">{ hint }</p>
+	</div>
+}
