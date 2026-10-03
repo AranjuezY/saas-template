@@ -60,13 +60,14 @@ type Resource struct {
 
 // Op 是一个登记操作的规格。
 type Op struct {
-	Name        string  `yaml:"name"`        // 操作名（PascalCase，与对外入口同名）
+	Name        string   `yaml:"name"`        // 操作名（PascalCase，与对外入口同名）
 	Kinds       []string `yaml:"kinds"`       // write | lifecycle | sideeffect，可叠加
-	Workflow    string  `yaml:"workflow"`    // 必填：对 workflow 的影响
-	Idempotency string  `yaml:"idempotency"` // 必填：幂等规则（重试不得重复生效）
-	Audit       string  `yaml:"audit"`       // 必填：审计规则
-	Input       []Field `yaml:"input"`       // 输入字段（有序，≥1）
-	Output      []Field `yaml:"output"`      // 输出字段（有序，可为空）
+	Activity    *bool    `yaml:"activity"`    // 仅 write/sideeffect：false = handler 直调 store，不生成 activity 包装（无编排通道）
+	Workflow    string   `yaml:"workflow"`    // 必填：对 workflow 的影响
+	Idempotency string   `yaml:"idempotency"` // 必填：幂等规则（重试不得重复生效）
+	Audit       string   `yaml:"audit"`       // 必填：审计规则
+	Input       []Field  `yaml:"input"`       // 输入字段（有序，≥1）
+	Output      []Field  `yaml:"output"`      // 输出字段（有序，可为空）
 }
 
 // Field 是操作的输入/输出字段。input/output 用列表而非映射，保持声明顺序稳定。
@@ -76,10 +77,10 @@ type Field struct {
 }
 
 var (
-	identRe   = regexp.MustCompile(`^[a-z][a-z0-9]*$`)
-	opNameRe  = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
-	tableRe   = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-	fieldRe   = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	identRe  = regexp.MustCompile(`^[a-z][a-z0-9]*$`)
+	opNameRe = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
+	tableRe  = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	fieldRe  = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 	// 类型白名单：原始类型 + time.Time + 同包快照类型（含切片形态）。
 	typeRe = regexp.MustCompile(`^(\[\])?(string|int|int64|float64|bool|time\.Time|[A-Z][A-Za-z0-9]*)$`)
 )
@@ -113,6 +114,16 @@ func (o Op) IsStoreOp() bool { return o.HasKind(KindWrite) || o.HasKind(KindSide
 
 // IsLifecycleOp 报告操作是否进入 Orchestrator 接口。
 func (o Op) IsLifecycleOp() bool { return o.HasKind(KindLifecycle) }
+
+// HasActivityWrapper 报告操作是否生成 activity 包装：
+// 仅 write/sideeffect 且未显式声明 activity: false（AGENTS.md 判定规则：
+// 不依赖流程也能独立成立的写操作，handler 直调 store，无需编排通道）。
+func (o Op) HasActivityWrapper() bool {
+	if !o.IsStoreOp() {
+		return false
+	}
+	return o.Activity == nil || *o.Activity
+}
 
 // LoadSpec 读取并解析一个 resgen.yaml。
 func LoadSpec(path string) (*Spec, error) {
@@ -173,6 +184,11 @@ func (s *Spec) Validate() error {
 
 		if typeOK && r.StoreBearing() && (op.Name == "List" || op.Name == "Get") {
 			errs = append(errs, fmt.Sprintf("%s: List / Get 是约定读操作保留名，不可登记", prefix))
+		}
+
+		// activity 开关只对进入 store 的操作（write / sideeffect）有意义。
+		if op.Activity != nil && !op.IsStoreOp() {
+			errs = append(errs, fmt.Sprintf("%s: activity 仅可标注于 write/sideeffect 操作（lifecycle 操作本就没有 activity 包装）", prefix))
 		}
 
 		if len(op.Kinds) == 0 {

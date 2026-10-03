@@ -31,6 +31,30 @@ func TestValidateAcceptsCompleteSpec(t *testing.T) {
 	}
 }
 
+// TestActivityWrapperSwitch activity 开关只影响 activity 包装：
+// 关闭后操作仍在 port.Ops（handler 直调 store），但不进 ActivityOps。
+func TestActivityWrapperSwitch(t *testing.T) {
+	f, tr := false, true
+	store := Op{Name: "CreateItem", Kinds: []string{KindWrite}, Workflow: "w", Idempotency: "i", Audit: "a",
+		Input: []Field{{Name: "item", Type: "Item"}}}
+
+	if !store.HasActivityWrapper() {
+		t.Error("默认（未标注）应生成 activity 包装")
+	}
+	store.Activity = &tr
+	if !store.HasActivityWrapper() {
+		t.Error("activity: true 应生成 activity 包装")
+	}
+	store.Activity = &f
+	if store.HasActivityWrapper() {
+		t.Error("activity: false 不应生成 activity 包装")
+	}
+	store.Kinds = []string{KindLifecycle}
+	if store.HasActivityWrapper() {
+		t.Error("lifecycle 操作本就没有 activity 包装")
+	}
+}
+
 func TestValidateRequiresEveryField(t *testing.T) {
 	cases := []struct {
 		name string
@@ -54,6 +78,11 @@ func TestValidateRequiresEveryField(t *testing.T) {
 			s.Operations[0].Input = []Field{{Name: "a", Type: "map[string]int"}}
 		}, "非法"},
 		{"非法表名", func(s *Spec) { s.Resource.Table = "Items!" }, "resource.table"},
+		{"activity 标于 lifecycle 操作", func(s *Spec) {
+			f := false
+			s.Operations[0].Kinds = []string{KindLifecycle}
+			s.Operations[0].Activity = &f
+		}, "activity 仅可标注于 write/sideeffect"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -72,8 +101,8 @@ func TestValidateRequiresEveryField(t *testing.T) {
 
 func TestTypeCapabilities(t *testing.T) {
 	cases := []struct {
-		typ                          string
-		store, activity, view, orch  bool
+		typ                         string
+		store, activity, view, orch bool
 	}{
 		{TypeBound, true, true, true, true},
 		{TypeCapability, false, false, false, false},

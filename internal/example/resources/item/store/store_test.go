@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/AranjuezY/saas-template/internal/example/resources/item/port"
 	"github.com/AranjuezY/saas-template/internal/shared/db"
@@ -49,18 +50,29 @@ func TestItemLifecycle(t *testing.T) {
 		t.Error("created_at not parsed")
 	}
 
-	updated, err := st.UpdateItemStage(ctx, port.UpdateItemStageInput{ID: created.ID, Stage: port.StageActive})
+	updated, err := st.ApplyItemLifecycle(ctx, port.ApplyItemLifecycleInput{
+		ID:        created.ID,
+		Stage:     port.StageActive,
+		ExpiresAt: time.Now().Add(port.DefaultValidity).UTC().Format(time.RFC3339),
+	})
 	if err != nil {
-		t.Fatalf("update stage: %v", err)
+		t.Fatalf("apply lifecycle: %v", err)
 	}
 	if updated.Item.Stage != port.StageActive {
 		t.Errorf("stage = %q, want active", updated.Item.Stage)
 	}
+	if updated.Item.ExpiresAt == nil {
+		t.Error("active 后应带到期时间")
+	}
 
 	// 同值再推一次：幂等（写相同值，不产生新事实）
-	again, err := st.UpdateItemStage(ctx, port.UpdateItemStageInput{ID: created.ID, Stage: port.StageActive})
+	again, err := st.ApplyItemLifecycle(ctx, port.ApplyItemLifecycleInput{
+		ID:        created.ID,
+		Stage:     port.StageActive,
+		ExpiresAt: updated.Item.ExpiryDisplay(),
+	})
 	if err != nil {
-		t.Fatalf("idempotent update stage: %v", err)
+		t.Fatalf("idempotent apply lifecycle: %v", err)
 	}
 	if again.Item.UpdatedAt.Before(updated.Item.UpdatedAt) {
 		t.Error("idempotent update should not regress updated_at")
@@ -105,11 +117,11 @@ func TestCreateValidation(t *testing.T) {
 	}
 }
 
-func TestUpdateStageNotFound(t *testing.T) {
+func TestApplyLifecycleNotFound(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
 
-	_, err := st.UpdateItemStage(ctx, port.UpdateItemStageInput{ID: 4242, Stage: port.StageActive})
+	_, err := st.ApplyItemLifecycle(ctx, port.ApplyItemLifecycleInput{ID: 4242, Stage: port.StageArchived})
 	if !errors.Is(err, port.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}

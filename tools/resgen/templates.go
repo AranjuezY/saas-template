@@ -77,9 +77,9 @@ type VM struct {
 	Domain string
 	Name   string
 
-	NameGo  string // 快照类型名（Item）
-	Table   string
-	Type    string
+	NameGo   string // 快照类型名（Item）
+	Table    string
+	Type     string
 	TypeDesc string
 
 	// 类型决定的目录/生成物开关
@@ -91,7 +91,8 @@ type VM struct {
 	Workflow string // 资源级"对 workflow 的影响"
 
 	Ops          []OpVM // 全部登记操作（规格顺序）
-	StoreOps     []OpVM // write/sideeffect：进入 port.Ops 与 activity
+	StoreOps     []OpVM // write/sideeffect：进入 port.Ops
+	ActivityOps  []OpVM // write/sideeffect 且未标 activity:false：生成 activity 包装
 	LifecycleOps []OpVM // lifecycle：进入 Orchestrator
 
 	NeedTime bool // 任一字段使用 time.Time（决定 ops_gen 是否 import time）
@@ -137,13 +138,13 @@ type FieldVM struct {
 func BuildVM(module string, s *Spec) VM {
 	r := s.Resource
 	vm := VM{
-		Module:   module,
-		Domain:   r.Domain,
-		Name:     r.Name,
-		NameGo:   modelType(r.Name),
-		Table:    r.Table,
-		Type:     r.Type,
-		TypeDesc: ResourceTypes[r.Type],
+		Module:       module,
+		Domain:       r.Domain,
+		Name:         r.Name,
+		NameGo:       modelType(r.Name),
+		Table:        r.Table,
+		Type:         r.Type,
+		TypeDesc:     ResourceTypes[r.Type],
 		HasStore:     r.StoreBearing(),
 		HasActivity:  r.HasActivity(),
 		HasView:      r.HasView(),
@@ -156,6 +157,9 @@ func BuildVM(module string, s *Spec) VM {
 		vm.Ops = append(vm.Ops, o)
 		if op.IsStoreOp() {
 			vm.StoreOps = append(vm.StoreOps, o)
+		}
+		if op.HasActivityWrapper() {
+			vm.ActivityOps = append(vm.ActivityOps, o)
 		}
 		if op.IsLifecycleOp() {
 			vm.LifecycleOps = append(vm.LifecycleOps, o)

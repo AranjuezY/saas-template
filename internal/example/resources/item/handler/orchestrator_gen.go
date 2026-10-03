@@ -13,10 +13,12 @@ import (
 // 生产实现是域 workflow 客户端（按 contract 契约按名调用，不 import workflow 定义）；
 // 测试用假实现直写 store，handler 测试因此无需 Temporal Server。
 type Orchestrator interface {
-	// CreateItem（write + lifecycle）。落库后以 item/{id} 拉起生命周期流程（Abandon 子流程），只等启动确认
-	CreateItem(ctx context.Context, in port.CreateItemInput) (port.CreateItemOutput, error)
-	// AdvanceStage（lifecycle）。向 item/{id} 发 activate / archive 信号；阶段只能由流程内的 activity 落库
-	AdvanceStage(ctx context.Context, in port.AdvanceStageInput) error
-	// DeleteItem（write + lifecycle）。删除的合规形态：CancelItemWorkflow 先请求取消 item/{id} 流程再删记录，全程留审计轨迹
+	// ActivateItem（lifecycle）。拉起 item/{id} 实例（若未运行），起 DefaultValidity 到期定时器
+	ActivateItem(ctx context.Context, in port.ActivateItemInput) (port.ActivateItemOutput, error)
+	// RenewItem（lifecycle）。将实例的到期定时器顺延一个 DefaultValidity
+	RenewItem(ctx context.Context, in port.RenewItemInput) (port.RenewItemOutput, error)
+	// ArchiveItem（lifecycle）。取消实例的到期定时器并结束实例
+	ArchiveItem(ctx context.Context, in port.ArchiveItemInput) (port.ArchiveItemOutput, error)
+	// DeleteItem（write + lifecycle）。active：结束实例（流程内删行）；draft / archived：无实例可影响
 	DeleteItem(ctx context.Context, in port.DeleteItemInput) error
 }

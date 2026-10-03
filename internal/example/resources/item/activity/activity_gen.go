@@ -22,7 +22,7 @@ import (
 // workflow 侧用它路由任务，resources-worker 只 poll 这个队列。
 const TaskQueue = "example.item.activities"
 
-// Activities 把 item 的全部写操作封装为 Temporal activity。
+// Activities 把 item 可经编排调用的写操作（未标 activity: false）封装为 Temporal activity。
 type Activities struct {
 	store port.Ops
 }
@@ -34,26 +34,19 @@ func New(database *sql.DB) *Activities {
 
 // Register 把所有 activity 注册到 worker。
 func (a *Activities) Register(r worker.Registry) {
-	r.RegisterActivity(a.CreateItem)
-	r.RegisterActivity(a.UpdateItemStage)
 	r.RegisterActivity(a.DeleteItem)
+	r.RegisterActivity(a.ApplyItemLifecycle)
 }
 
-// CreateItem（write + lifecycle）转发到 store。幂等：ExecuteWorkflow 是持久化启动，worker 恢复后补执行，不重复发起；落库本身产生新 ID，重复执行表现为新增而非覆盖；审计：created_at / updated_at 字段 + workflow 执行历史
-func (a *Activities) CreateItem(ctx context.Context, in port.CreateItemInput) (port.CreateItemOutput, error) {
-	out, err := a.store.CreateItem(ctx, in)
-	return out, wrapActivityError(err)
-}
-
-// UpdateItemStage（write）转发到 store。幂等：UPDATE 到相同值幂等；目标行不存在返回 ErrNotFound，重试不重复生效；审计：updated_at 字段
-func (a *Activities) UpdateItemStage(ctx context.Context, in port.UpdateItemStageInput) (port.UpdateItemStageOutput, error) {
-	out, err := a.store.UpdateItemStage(ctx, in)
-	return out, wrapActivityError(err)
-}
-
-// DeleteItem（write + lifecycle）转发到 store。幂等：二次删除返回 ErrNotFound；先取消后删除的顺序保证不留孤儿 Running 实例；审计：workflow 执行历史 + RowsAffected 检查
+// DeleteItem（write + lifecycle）转发到 store。幂等：目标已达成（行已删）返回成功；无拒绝条件；审计：无长期痕迹（行已删除）；workflow 事件历史与 HTTP 访问日志（均受保留期限制）
 func (a *Activities) DeleteItem(ctx context.Context, in port.DeleteItemInput) error {
 	return wrapActivityError(a.store.DeleteItem(ctx, in))
+}
+
+// ApplyItemLifecycle（write）转发到 store。幂等：目标已达成（同值）返回当前快照；行不存在返回 ErrNotFound（目标不可达成）；审计：stage / expires_at / updated_at 字段（可长期保留，随行存活）
+func (a *Activities) ApplyItemLifecycle(ctx context.Context, in port.ApplyItemLifecycleInput) (port.ApplyItemLifecycleOutput, error) {
+	out, err := a.store.ApplyItemLifecycle(ctx, in)
+	return out, wrapActivityError(err)
 }
 
 // wrapActivityError 把业务错误标记为不可重试并保留用户可读消息；

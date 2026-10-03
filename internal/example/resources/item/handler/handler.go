@@ -1,6 +1,7 @@
 // Package handler 是 item 资源的 HTTP 处理层。
 //
-// 写路径全部经 Orchestrator 进入编排（接口由 resgen 生成于 orchestrator_gen.go，
+// 资料类事实（title）由本层直写 store；流程拥有的事实（stage / expires_at）
+// 经 Orchestrator 进入编排（接口由 resgen 生成于 orchestrator_gen.go，
 // 生产实现是 workflow.Client，测试用假实现直写 store，
 // handler 测试因此无需 Temporal Server）。
 package handler
@@ -24,10 +25,14 @@ func New(st port.Ops, orch Orchestrator) *Handler {
 }
 
 // Register 把 item 路由挂到 mux（Go 1.22+ 方法+通配符语法）。
+// 生命周期动作是显式端点（activate / renew / archive），
+// 分别映射为对流程实例的三个信号。
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /items", h.list)
 	mux.HandleFunc("POST /items", h.create)
-	mux.HandleFunc("PATCH /items/{id}/stage", h.updateStage)
+	mux.HandleFunc("POST /items/{id}/activate", h.activate)
+	mux.HandleFunc("POST /items/{id}/renew", h.renew)
+	mux.HandleFunc("POST /items/{id}/archive", h.archive)
 	mux.HandleFunc("DELETE /items/{id}", h.delete)
 }
 

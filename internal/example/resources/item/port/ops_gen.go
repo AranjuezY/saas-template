@@ -31,31 +31,45 @@ type Operation struct {
 var Operations = []Operation{
 	{
 		Name:           "CreateItem",
-		Kinds:          []OpKind{OpWrite, OpLifecycle},
-		WorkflowImpact: "落库后以 item/{id} 拉起生命周期流程（Abandon 子流程），只等启动确认",
-		Idempotency:    "ExecuteWorkflow 是持久化启动，worker 恢复后补执行，不重复发起；落库本身产生新 ID，重复执行表现为新增而非覆盖",
-		Audit:          "created_at / updated_at 字段 + workflow 执行历史",
-	},
-	{
-		Name:           "AdvanceStage",
-		Kinds:          []OpKind{OpLifecycle},
-		WorkflowImpact: "向 item/{id} 发 activate / archive 信号；阶段只能由流程内的 activity 落库",
-		Idempotency:    "信号重复送达安全：目标阶段与当前一致时 UPDATE 写相同值，不产生新事实",
-		Audit:          "workflow 事件历史 + updated_at",
-	},
-	{
-		Name:           "UpdateItemStage",
 		Kinds:          []OpKind{OpWrite},
-		WorkflowImpact: "仅被生命周期流程的信号分支调用，是条目阶段唯一写入口；页面不得直接改",
-		Idempotency:    "UPDATE 到相同值幂等；目标行不存在返回 ErrNotFound，重试不重复生效",
-		Audit:          "updated_at 字段",
+		WorkflowImpact: "无影响：draft 无流程实例",
+		Idempotency:    "无去重键，重复执行表现为新增；调用方不得对同一意图重试",
+		Audit:          "items 行的 created_at / updated_at（可长期保留，随行存活）",
+	},
+	{
+		Name:           "ActivateItem",
+		Kinds:          []OpKind{OpLifecycle},
+		WorkflowImpact: "拉起 item/{id} 实例（若未运行），起 DefaultValidity 到期定时器",
+		Idempotency:    "目标已达成（已 active）返回当前快照；无拒绝条件",
+		Audit:          "expires_at / updated_at 字段（可长期保留，随行存活）；workflow 事件历史（受保留期限制）",
+	},
+	{
+		Name:           "RenewItem",
+		Kinds:          []OpKind{OpLifecycle},
+		WorkflowImpact: "将实例的到期定时器顺延一个 DefaultValidity",
+		Idempotency:    "冲突则拒绝：非 active，或已到期（自动归档进行中）；同输入重放按 Update ID 去重，状态变化后的新意图各自顺延",
+		Audit:          "expires_at / updated_at 字段（可长期保留，随行存活）；workflow 事件历史（受保留期限制）",
+	},
+	{
+		Name:           "ArchiveItem",
+		Kinds:          []OpKind{OpLifecycle},
+		WorkflowImpact: "取消实例的到期定时器并结束实例",
+		Idempotency:    "目标已达成（已归档）时实例已关闭，重复请求在传输层被拒；运行中无拒绝条件",
+		Audit:          "stage / updated_at 字段（可长期保留，随行存活）；workflow 事件历史（受保留期限制）",
 	},
 	{
 		Name:           "DeleteItem",
 		Kinds:          []OpKind{OpWrite, OpLifecycle},
-		WorkflowImpact: "删除的合规形态：CancelItemWorkflow 先请求取消 item/{id} 流程再删记录，全程留审计轨迹",
-		Idempotency:    "二次删除返回 ErrNotFound；先取消后删除的顺序保证不留孤儿 Running 实例",
-		Audit:          "workflow 执行历史 + RowsAffected 检查",
+		WorkflowImpact: "active：结束实例（流程内删行）；draft / archived：无实例可影响",
+		Idempotency:    "目标已达成（行已删）返回成功；无拒绝条件",
+		Audit:          "无长期痕迹（行已删除）；workflow 事件历史与 HTTP 访问日志（均受保留期限制）",
+	},
+	{
+		Name:           "ApplyItemLifecycle",
+		Kinds:          []OpKind{OpWrite},
+		WorkflowImpact: "无影响：仅由实例自身调用",
+		Idempotency:    "目标已达成（同值）返回当前快照；行不存在返回 ErrNotFound（目标不可达成）",
+		Audit:          "stage / expires_at / updated_at 字段（可长期保留，随行存活）",
 	},
 }
 
@@ -69,21 +83,39 @@ type CreateItemOutput struct {
 	Item Item `json:"item"`
 }
 
-// AdvanceStageInput 是 AdvanceStage 的输入（快照值，不带行为、不连数据库）。
-type AdvanceStageInput struct {
-	ID           int64  `json:"id"`
-	CurrentStage string `json:"current_stage"`
-	NextStage    string `json:"next_stage"`
+// ActivateItemInput 是 ActivateItem 的输入（快照值，不带行为、不连数据库）。
+type ActivateItemInput struct {
+	ID               int64  `json:"id"`
+	CurrentStage     string `json:"current_stage"`
+	CurrentExpiresAt string `json:"current_expires_at"`
 }
 
-// UpdateItemStageInput 是 UpdateItemStage 的输入（快照值，不带行为、不连数据库）。
-type UpdateItemStageInput struct {
-	ID    int64  `json:"id"`
-	Stage string `json:"stage"`
+// ActivateItemOutput 是 ActivateItem 的输出。
+type ActivateItemOutput struct {
+	Item Item `json:"item"`
 }
 
-// UpdateItemStageOutput 是 UpdateItemStage 的输出。
-type UpdateItemStageOutput struct {
+// RenewItemInput 是 RenewItem 的输入（快照值，不带行为、不连数据库）。
+type RenewItemInput struct {
+	ID               int64  `json:"id"`
+	CurrentStage     string `json:"current_stage"`
+	CurrentExpiresAt string `json:"current_expires_at"`
+}
+
+// RenewItemOutput 是 RenewItem 的输出。
+type RenewItemOutput struct {
+	Item Item `json:"item"`
+}
+
+// ArchiveItemInput 是 ArchiveItem 的输入（快照值，不带行为、不连数据库）。
+type ArchiveItemInput struct {
+	ID               int64  `json:"id"`
+	CurrentStage     string `json:"current_stage"`
+	CurrentExpiresAt string `json:"current_expires_at"`
+}
+
+// ArchiveItemOutput 是 ArchiveItem 的输出。
+type ArchiveItemOutput struct {
 	Item Item `json:"item"`
 }
 
@@ -93,15 +125,27 @@ type DeleteItemInput struct {
 	Reason string `json:"reason"`
 }
 
+// ApplyItemLifecycleInput 是 ApplyItemLifecycle 的输入（快照值，不带行为、不连数据库）。
+type ApplyItemLifecycleInput struct {
+	ID        int64  `json:"id"`
+	Stage     string `json:"stage"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+// ApplyItemLifecycleOutput 是 ApplyItemLifecycle 的输出。
+type ApplyItemLifecycleOutput struct {
+	Item Item `json:"item"`
+}
+
 // Ops 是 item 的操作接口：规格登记的 write / sideeffect 操作与约定读操作。
 // 实现于 store 包的未导出类型，构造函数返回本接口——每个可变事实只有一个写入点。
 type Ops interface {
-	// CreateItem（write + lifecycle）。幂等：ExecuteWorkflow 是持久化启动，worker 恢复后补执行，不重复发起；落库本身产生新 ID，重复执行表现为新增而非覆盖
+	// CreateItem（write）。幂等：无去重键，重复执行表现为新增；调用方不得对同一意图重试
 	CreateItem(ctx context.Context, in CreateItemInput) (CreateItemOutput, error)
-	// UpdateItemStage（write）。幂等：UPDATE 到相同值幂等；目标行不存在返回 ErrNotFound，重试不重复生效
-	UpdateItemStage(ctx context.Context, in UpdateItemStageInput) (UpdateItemStageOutput, error)
-	// DeleteItem（write + lifecycle）。幂等：二次删除返回 ErrNotFound；先取消后删除的顺序保证不留孤儿 Running 实例
+	// DeleteItem（write + lifecycle）。幂等：目标已达成（行已删）返回成功；无拒绝条件
 	DeleteItem(ctx context.Context, in DeleteItemInput) error
+	// ApplyItemLifecycle（write）。幂等：目标已达成（同值）返回当前快照；行不存在返回 ErrNotFound（目标不可达成）
+	ApplyItemLifecycle(ctx context.Context, in ApplyItemLifecycleInput) (ApplyItemLifecycleOutput, error)
 
 	// List 约定读操作：全量查询（LIMIT 内按需调整分页）。
 	List(ctx context.Context) ([]Item, error)

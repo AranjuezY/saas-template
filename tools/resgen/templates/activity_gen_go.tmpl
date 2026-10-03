@@ -22,7 +22,7 @@ import (
 // workflow 侧用它路由任务，resources-worker 只 poll 这个队列。
 const TaskQueue = "{{.Domain}}.{{.Name}}.activities"
 
-// Activities 把 {{.Name}} 的全部写操作封装为 Temporal activity。
+// Activities 把 {{.Name}} 可经编排调用的写操作（未标 activity: false）封装为 Temporal activity。
 type Activities struct {
 	store port.Ops
 }
@@ -34,9 +34,9 @@ func New(database *sql.DB) *Activities {
 
 // Register 把所有 activity 注册到 worker。
 func (a *Activities) Register(r worker.Registry) {
-{{range .StoreOps}}	r.RegisterActivity(a.{{.Name}})
+{{range .ActivityOps}}	r.RegisterActivity(a.{{.Name}})
 {{end}}}
-{{range .StoreOps}}
+{{range .ActivityOps}}
 // {{.Name}}（{{.KindTags}}）转发到 store。幂等：{{.Idempotency}}；审计：{{.Audit}}
 func (a *Activities) {{.Name}}(ctx context.Context, in port.{{.InputType}}) {{if .HasOutput}}(port.{{.OutputType}}, error){{else}}error{{end}} {
 {{if .HasOutput}}	out, err := a.store.{{.Name}}(ctx, in)

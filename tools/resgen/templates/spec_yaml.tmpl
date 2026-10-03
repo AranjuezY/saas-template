@@ -14,10 +14,13 @@ resource:
 # 必填：写入 / 生命周期 / 副作用操作清单（至少 1 项），逐项字段全部必填：
 #   name 操作名（PascalCase）/ kinds 类别 / workflow 对流程的影响 /
 #   idempotency 幂等规则（重试不得重复生效）/ audit 审计规则 / input 输入字段（至少 1 个）。
+# write/sideeffect 操作可选 activity: false——不依赖流程也能独立成立的写操作，
+# handler 直调 store，不生成 activity 包装（无编排通道）。
 operations: []
 # 参考示例：
 # - name: Create{{.NameGo}}
 #   kinds: [write]
+#   activity: false
 #   workflow: "无：纯维护资源不影响任何流程（如影响则写明如何启动/推进/结束流程）"
 #   idempotency: "重复提交如何不重复生效的保证手段"
 #   audit: "审计事实如何留存（字段 / 日志 / workflow 历史）"

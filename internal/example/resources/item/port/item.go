@@ -11,10 +11,14 @@ import (
 
 // 生命周期阶段。
 const (
-	StageDraft    = "draft"    // 草稿（创建即入）
-	StageActive   = "active"   // 启用
+	StageDraft    = "draft"    // 草稿（创建即入，无到期承诺）
+	StageActive   = "active"   // 启用（带有效期，到期未续期则自动归档）
 	StageArchived = "archived" // 归档（终态，流程结束）
 )
+
+// DefaultValidity 是启用后的默认有效期：到期前可续期（顺延一个周期），
+// 到期无人处理则由生命周期流程自动归档。规则变更只改这一处。
+const DefaultValidity = 7 * 24 * time.Hour
 
 // Stages 按生命周期顺序列出所有合法阶段。
 var Stages = []string{StageDraft, StageActive, StageArchived}
@@ -47,11 +51,20 @@ func (e ValidationError) Error() string { return e.Field + ": " + e.Message }
 
 // Item 是一条条目记录的快照。
 type Item struct {
-	ID        int64     `json:"id"`
-	Title     string    `json:"title"`
-	Stage     string    `json:"stage"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID        int64      `json:"id"`
+	Title     string     `json:"title"`
+	Stage     string     `json:"stage"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"` // 到期时间（active 必有；draft / archived 为空）
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+}
+
+// ExpiryDisplay 返回用于展示的 RFC3339 到期时间（无到期返回空串）。
+func (i Item) ExpiryDisplay() string {
+	if i.ExpiresAt == nil {
+		return ""
+	}
+	return i.ExpiresAt.UTC().Format(time.RFC3339)
 }
 
 // Normalize 清理首尾空白并补全默认值。

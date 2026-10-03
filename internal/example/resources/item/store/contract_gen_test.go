@@ -7,6 +7,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/AranjuezY/saas-template/internal/example/resources/item/port"
 	"github.com/AranjuezY/saas-template/internal/shared/db"
@@ -60,7 +61,7 @@ func TestContractCreateItem(t *testing.T) {
 	}
 }
 
-func TestContractUpdateItemStage(t *testing.T) {
+func TestContractApplyItemLifecycle(t *testing.T) {
 	st := newContractStore(t)
 	ctx := context.Background()
 
@@ -68,36 +69,60 @@ func TestContractUpdateItemStage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateItem: %v", err)
 	}
-
-	updated, err := st.UpdateItemStage(ctx, port.UpdateItemStageInput{ID: created.Item.ID, Stage: port.StageActive})
-	if err != nil {
-		t.Fatalf("UpdateItemStage: %v", err)
+	if created.Item.Stage != port.StageDraft {
+		t.Errorf("创建即 draft, got %q", created.Item.Stage)
 	}
-	if updated.Item.Stage != port.StageActive {
-		t.Errorf("stage = %q, want active", updated.Item.Stage)
+	if created.Item.ExpiresAt != nil {
+		t.Error("draft 不应有到期时间")
+	}
+
+	expires := time.Now().Add(port.DefaultValidity).UTC().Format(time.RFC3339)
+
+	// 校验规则：active 必须携带可解析的到期时间。
+	if _, err := st.ApplyItemLifecycle(ctx, port.ApplyItemLifecycleInput{ID: created.Item.ID, Stage: port.StageActive}); err == nil {
+		t.Error("active 缺少 expires_at 应校验失败")
+	}
+	if _, err := st.ApplyItemLifecycle(ctx, port.ApplyItemLifecycleInput{ID: created.Item.ID, Stage: port.StageActive, ExpiresAt: "not-a-time"}); err == nil {
+		t.Error("expires_at 非法格式应校验失败")
+	}
+	// 校验规则：归档必须清空到期时间；draft 不是流程可写的目标阶段。
+	if _, err := st.ApplyItemLifecycle(ctx, port.ApplyItemLifecycleInput{ID: created.Item.ID, Stage: port.StageArchived, ExpiresAt: expires}); err == nil {
+		t.Error("归档携带 expires_at 应校验失败")
+	}
+	if _, err := st.ApplyItemLifecycle(ctx, port.ApplyItemLifecycleInput{ID: created.Item.ID, Stage: port.StageDraft}); err == nil {
+		t.Error("写回 draft 应校验失败（流程只推进 active / archived）")
+	}
+
+	updated, err := st.ApplyItemLifecycle(ctx, port.ApplyItemLifecycleInput{ID: created.Item.ID, Stage: port.StageActive, ExpiresAt: expires})
+	if err != nil {
+		t.Fatalf("ApplyItemLifecycle: %v", err)
+	}
+	if updated.Item.Stage != port.StageActive || updated.Item.ExpiresAt == nil {
+		t.Errorf("active 落库后 = %+v", updated.Item)
 	}
 
 	// 幂等规则：UPDATE 到相同值幂等——重试不报错、事实不变。
-	same, err := st.UpdateItemStage(ctx, port.UpdateItemStageInput{ID: created.Item.ID, Stage: port.StageActive})
+	same, err := st.ApplyItemLifecycle(ctx, port.ApplyItemLifecycleInput{ID: created.Item.ID, Stage: port.StageActive, ExpiresAt: expires})
 	if err != nil {
-		t.Fatalf("同值重放 UpdateItemStage: %v", err)
+		t.Fatalf("同值重放 ApplyItemLifecycle: %v", err)
 	}
-	if same.Item.Stage != port.StageActive {
-		t.Errorf("同值重放后 stage = %q, want active", same.Item.Stage)
-	}
-	if same.Item.UpdatedAt.Before(updated.Item.UpdatedAt) {
-		t.Error("同值重放不应使 updated_at 倒退")
+	if same.Item.Stage != port.StageActive || same.Item.UpdatedAt.Before(updated.Item.UpdatedAt) {
+		t.Errorf("同值重放后 = %+v", same.Item)
 	}
 
 	// 幂等规则：目标行不存在返回 ErrNotFound，重试不重复生效。
-	_, err = st.UpdateItemStage(ctx, port.UpdateItemStageInput{ID: 424242, Stage: port.StageActive})
+	_, err = st.ApplyItemLifecycle(ctx, port.ApplyItemLifecycleInput{ID: 424242, Stage: port.StageArchived})
 	if !errors.Is(err, port.ErrNotFound) {
 		t.Errorf("缺失目标 err = %v, want ErrNotFound", err)
 	}
 
-	// 审计规则：updated_at 字段随阶段更新推进（秒级精度下断言"不早于"）。
-	if same.Item.UpdatedAt.Before(created.Item.UpdatedAt) {
-		t.Error("阶段更新后 updated_at 不应早于 created_at")
+	// 归档清空到期时间（终态）。
+	archived, err := st.ApplyItemLifecycle(ctx, port.ApplyItemLifecycleInput{ID: created.Item.ID, Stage: port.StageArchived})
+	if err != nil {
+		t.Fatalf("归档: %v", err)
+	}
+	if archived.Item.Stage != port.StageArchived || archived.Item.ExpiresAt != nil {
+		t.Errorf("归档后 = %+v, want stage=archived 且无到期", archived.Item)
 	}
 }
 

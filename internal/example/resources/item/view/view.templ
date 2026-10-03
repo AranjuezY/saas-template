@@ -12,7 +12,7 @@ templ Page(list []port.Item) {
 	@ui.Base("Items · saas-template") {
 		<main class="mx-auto w-full max-w-4xl px-4 py-8">
 			<h1 class="text-2xl font-bold">Items</h1>
-			<p class="mt-1 text-sm opacity-60">saas-template 示例域：item 生命周期</p>
+			<p class="mt-1 text-sm opacity-60">saas-template 示例域：item 生命周期（激活后 7 天有效，到期自动归档，可续期或提前归档）</p>
 			<div class="mt-6 grid items-start gap-6 md:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
 				@Form()
 				@ui.Card("") {
@@ -22,6 +22,7 @@ templ Page(list []port.Item) {
 								<tr class="text-left text-xs uppercase opacity-50">
 									<th class="py-1">标题</th>
 									<th>阶段</th>
+									<th>到期</th>
 									<th>创建时间</th>
 									<th class="text-right">操作</th>
 								</tr>
@@ -41,7 +42,7 @@ templ Page(list []port.Item) {
 templ Rows(list []port.Item) {
 	if len(list) == 0 {
 		<tr>
-			<td colspan="4">
+			<td colspan="5">
 				@ui.EmptyState("还没有条目", "在左侧添加一个")
 			</td>
 		</tr>
@@ -52,37 +53,59 @@ templ Rows(list []port.Item) {
 	}
 }
 
-// Row 单行条目记录。阶段变更与删除在服务端分别映射为
-// "向流程实例发信号"和"取消流程"，不会绕过 Temporal 直接写库。
+// Row 单行条目记录。启用 / 续期 / 归档在服务端分别映射为对生命周期
+// 流程的三个信号，不会绕过 Temporal 直接改库。
 templ Row(i port.Item) {
 	<tr id={ "item-" + strconv.FormatInt(i.ID, 10) } class="border-t border-neutral-100">
 		<td class="py-2 font-medium">{ i.Title }</td>
-		<td>
-			<form
-				hx-patch={ "/items/" + strconv.FormatInt(i.ID, 10) + "/stage" }
-				hx-target="closest tr"
-				hx-swap="outerHTML"
-				hx-trigger="change"
-			>
-				<select class="rounded border border-neutral-300 px-1 py-0.5 text-xs" name="stage" aria-label="更新阶段">
-					for _, s := range StageOptions() {
-						<option value={ s } selected?={ s == i.Stage }>{ StageLabel(s) }</option>
-					}
-				</select>
-			</form>
-		</td>
+		<td><span class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs">{ StageLabel(i.Stage) }</span></td>
+		<td class="whitespace-nowrap text-xs opacity-70">{ ExpiryLabel(i) }</td>
 		<td class="whitespace-nowrap text-xs opacity-70">{ ui.FormatTime(i.CreatedAt) }</td>
 		<td class="text-right">
-			<button
-				class="text-xs text-red-600 hover:underline"
-				type="button"
-				hx-delete={ "/items/" + strconv.FormatInt(i.ID, 10) }
-				hx-target="closest tr"
-				hx-swap="outerHTML swap:150ms"
-				hx-confirm={ "确定删除 " + i.Title + " 吗？（将同时取消其生命周期流程）" }
-			>
-				删除
-			</button>
+			<div class="flex justify-end gap-2">
+				if i.Stage == port.StageDraft {
+					<button
+						class="text-xs text-neutral-600 hover:underline"
+						type="button"
+						hx-post={ "/items/" + strconv.FormatInt(i.ID, 10) + "/activate" }
+						hx-target="closest tr"
+						hx-swap="outerHTML"
+					>
+						启用
+					</button>
+				}
+				if i.Stage == port.StageActive {
+					<button
+						class="text-xs text-neutral-600 hover:underline"
+						type="button"
+						hx-post={ "/items/" + strconv.FormatInt(i.ID, 10) + "/renew" }
+						hx-target="closest tr"
+						hx-swap="outerHTML"
+					>
+						续期 7 天
+					</button>
+					<button
+						class="text-xs text-neutral-600 hover:underline"
+						type="button"
+						hx-post={ "/items/" + strconv.FormatInt(i.ID, 10) + "/archive" }
+						hx-target="closest tr"
+						hx-swap="outerHTML"
+						hx-confirm={ "确定归档 " + i.Title + " 吗？" }
+					>
+						归档
+					</button>
+				}
+				<button
+					class="text-xs text-red-600 hover:underline"
+					type="button"
+					hx-delete={ "/items/" + strconv.FormatInt(i.ID, 10) }
+					hx-target="closest tr"
+					hx-swap="outerHTML swap:150ms"
+					hx-confirm={ "确定删除 " + i.Title + " 吗？（生命周期流程将一并结束）" }
+				>
+					删除
+				</button>
+			</div>
 		</td>
 	</tr>
 }

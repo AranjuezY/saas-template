@@ -3,6 +3,8 @@
 #
 # 资源类型：bound 绑定型 / capability 能力型 / reference 参照型 / trigger 触发型 / plain 纯维护。
 # 操作 kind 三类，不再细分：write 写事实 / lifecycle 动流程 / sideeffect 外部副作用；只读操作不登记。
+# 文案三段各答一问：workflow=对流程实例做什么；idempotency=同一请求重复执行的结果；
+# audit=痕迹落在哪里（区分可长期保留 / 受保留期限制）。
 resource:
   domain: example
   name: item
@@ -10,48 +12,78 @@ resource:
   table: items
   # 对 workflow 的影响总述。
   workflow: >-
-    绑定型资源：每个条目实体对应一个生命周期 workflow（确定性 ID item/{id}）。
-    创建与删除经短命令 workflow；阶段只能由生命周期流程内的 activity 落库，
-    页面不得直接改。
+    绑定型资源：全域只有一个 workflow——条目生命周期流程（确定性 ID item/{id}）。
+    draft 无承诺、无流程实例；首次 activate 时由 UpdateWithStart 拉起实例并起
+    DefaultValidity 有效期定时器；renew 将到期时间顺延一个周期；archive 更新或
+    到期定时器触发即归档（终态）。stage 与 expires_at 只能由流程内的 activity
+    写入，页面不得直接改。
 
-# 写入 / 生命周期 / 副作用操作清单（只读操作不登记），逐项含幂等与审计规则。
+# 写入 / 生命周期 / 副作用操作清单（只读操作不登记）。
 operations:
   - name: CreateItem
-    kinds: [write, lifecycle]
-    workflow: "落库后以 item/{id} 拉起生命周期流程（Abandon 子流程），只等启动确认"
-    idempotency: "ExecuteWorkflow 是持久化启动，worker 恢复后补执行，不重复发起；落库本身产生新 ID，重复执行表现为新增而非覆盖"
-    audit: "created_at / updated_at 字段 + workflow 执行历史"
+    kinds: [write]
+    activity: false
+    workflow: "无影响：draft 无流程实例"
+    idempotency: "无去重键，重复执行表现为新增；调用方不得对同一意图重试"
+    audit: "items 行的 created_at / updated_at（可长期保留，随行存活）"
     input:
       - { name: item, type: Item }
     output:
       - { name: item, type: Item }
 
-  - name: AdvanceStage
+  - name: ActivateItem
     kinds: [lifecycle]
-    workflow: "向 item/{id} 发 activate / archive 信号；阶段只能由流程内的 activity 落库"
-    idempotency: "信号重复送达安全：目标阶段与当前一致时 UPDATE 写相同值，不产生新事实"
-    audit: "workflow 事件历史 + updated_at"
+    workflow: "拉起 item/{id} 实例（若未运行），起 DefaultValidity 到期定时器"
+    idempotency: "目标已达成（已 active）返回当前快照；无拒绝条件"
+    audit: "expires_at / updated_at 字段（可长期保留，随行存活）；workflow 事件历史（受保留期限制）"
     input:
       - { name: id, type: int64 }
       - { name: current_stage, type: string }
-      - { name: next_stage, type: string }
+      - { name: current_expires_at, type: string }
+    output:
+      - { name: item, type: Item }
 
-  - name: UpdateItemStage
-    kinds: [write]
-    workflow: "仅被生命周期流程的信号分支调用，是条目阶段唯一写入口；页面不得直接改"
-    idempotency: "UPDATE 到相同值幂等；目标行不存在返回 ErrNotFound，重试不重复生效"
-    audit: "updated_at 字段"
+  - name: RenewItem
+    kinds: [lifecycle]
+    workflow: "将实例的到期定时器顺延一个 DefaultValidity"
+    idempotency: "冲突则拒绝：非 active，或已到期（自动归档进行中）；同输入重放按 Update ID 去重，状态变化后的新意图各自顺延"
+    audit: "expires_at / updated_at 字段（可长期保留，随行存活）；workflow 事件历史（受保留期限制）"
     input:
       - { name: id, type: int64 }
-      - { name: stage, type: string }
+      - { name: current_stage, type: string }
+      - { name: current_expires_at, type: string }
+    output:
+      - { name: item, type: Item }
+
+  - name: ArchiveItem
+    kinds: [lifecycle]
+    workflow: "取消实例的到期定时器并结束实例"
+    idempotency: "目标已达成（已归档）时实例已关闭，重复请求在传输层被拒；运行中无拒绝条件"
+    audit: "stage / updated_at 字段（可长期保留，随行存活）；workflow 事件历史（受保留期限制）"
+    input:
+      - { name: id, type: int64 }
+      - { name: current_stage, type: string }
+      - { name: current_expires_at, type: string }
     output:
       - { name: item, type: Item }
 
   - name: DeleteItem
     kinds: [write, lifecycle]
-    workflow: "删除的合规形态：CancelItemWorkflow 先请求取消 item/{id} 流程再删记录，全程留审计轨迹"
-    idempotency: "二次删除返回 ErrNotFound；先取消后删除的顺序保证不留孤儿 Running 实例"
-    audit: "workflow 执行历史 + RowsAffected 检查"
+    workflow: "active：结束实例（流程内删行）；draft / archived：无实例可影响"
+    idempotency: "目标已达成（行已删）返回成功；无拒绝条件"
+    audit: "无长期痕迹（行已删除）；workflow 事件历史与 HTTP 访问日志（均受保留期限制）"
     input:
       - { name: id, type: int64 }
       - { name: reason, type: string }
+
+  - name: ApplyItemLifecycle
+    kinds: [write]
+    workflow: "无影响：仅由实例自身调用"
+    idempotency: "目标已达成（同值）返回当前快照；行不存在返回 ErrNotFound（目标不可达成）"
+    audit: "stage / expires_at / updated_at 字段（可长期保留，随行存活）"
+    input:
+      - { name: id, type: int64 }
+      - { name: stage, type: string }
+      - { name: expires_at, type: string }
+    output:
+      - { name: item, type: Item }

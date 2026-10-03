@@ -3,7 +3,10 @@
 package view
 
 import (
+	"fmt"
+	"math"
 	"net/http"
+	"time"
 
 	"github.com/AranjuezY/saas-template/internal/example/resources/item/port"
 	"github.com/AranjuezY/saas-template/internal/shared/ui"
@@ -23,8 +26,22 @@ func StageLabel(stage string) string {
 	return stage
 }
 
-// StageOptions 返回下拉框选项。
-func StageOptions() []string { return port.Stages }
+// ExpiryLabel 返回到期时间的展示文案："N 天后到期" / "24 小时内到期" /
+// "已过期"；无到期时间（draft / archived）返回空串。
+func ExpiryLabel(i port.Item) string {
+	if i.ExpiresAt == nil {
+		return ""
+	}
+	d := time.Until(*i.ExpiresAt)
+	if d < 0 {
+		return "已过期，即将自动归档"
+	}
+	// 向上取整：到期前最后一天仍显示"N 天后"，与"还有几天"的直觉一致。
+	if days := int(math.Ceil(d.Hours() / 24)); days >= 1 {
+		return fmt.Sprintf("%d 天后到期", days)
+	}
+	return "24 小时内到期"
+}
 
 // ---- handler 用的渲染辅助（经 shared/ui 中转）----
 

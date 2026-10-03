@@ -34,8 +34,9 @@ internal/<域>/
 - 骨架与代码契约由 `tools/resgen` 从规格（资源根 `resgen.yaml`）生成：
   `resgen resource add <域>/<资源> --type <类型>` 建目录骨架，`go generate ./...`
   生成 `ops_gen.go`（操作接口 + 输入输出类型 + 操作描述表）、
-  Orchestrator 接口、activity 包装（仅 bound）与契约测试骨架（初始为红，
-  填断言变绿才算实现完成）。规格留空必填字段即拒绝生成。
+  Orchestrator 接口、activity 包装（仅 bound；write/sideeffect 操作标注
+  `activity: false` 即不生成包装——handler 直调 store，无编排通道）与
+  契约测试骨架（初始为红，填断言变绿才算实现完成）。规格留空必填字段即拒绝生成。
   `*_gen.go` 不得手改（重生成会覆盖）；`contract_gen_test.go` 仅首次生成，之后人工维护。
 
 ## 4. 判断规则
@@ -70,6 +71,15 @@ internal/<域>/
   否则取消请求送达后流程永远阻塞，留下孤儿 Running 实例。
 - 重置业务库但保留 Temporal 历史时，自增 ID 会与已完成 workflow 撞 ID。
 - 候选类写请求超时 ≠ 取消：ExecuteWorkflow 是持久化启动，worker 恢复后会补执行。
+- update handler 跑在自己的协程上：阻塞调用（activity）必须用 handler 收到的
+  ctx，借用主协程 ctx 会报 "coroutine already blocked"。
+- update handler 唤醒主循环用带缓冲通道 + `SendAsync`：无缓冲 `Send` 会与
+  `Await(AllHandlersFinished)` 互锁（各等对方接收）。
+- update handler 的业务拒绝必须用 `temporal.NewNonRetryableApplicationError`
+  信封：普通 error 跨进程后 NonRetryable=false，HTTP 侧认不出，只剩兜底文案。
+- Go 测试环境不链接根 workflow 的 Continue-As-New（仅子流程会重跑）：
+  CAN 行为只能断言错误本身携带的续传入参。另外 update 测试不能依赖
+  0 延迟回调（信号可缓冲，update 需 handler 已注册），用小延迟。
 
 ## 7. 先问再做
 
