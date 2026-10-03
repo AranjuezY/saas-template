@@ -89,6 +89,8 @@ func run() error {
 	orch := exampleworkflow.NewClient(tc, 10*time.Second)
 
 	mux := http.NewServeMux()
+	// 自托管静态资源（样式 + htmx，go:embed 内嵌，无 CDN）。
+	mux.Handle("GET /assets/", ui.Assets())
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		list, err := st.List(r.Context())
 		if err != nil {

@@ -6,3 +6,10 @@ coverage.html
 .DS_Store
 .env
 .env.local
+
+
+# 前端第三方资产（不入库，web/setup.sh 按版本+SHA256 拉取）：
+# - htmx 运行时库（go:embed 依赖，clone 后先跑 web/setup.sh）
+# - web/.cache/：daisyUI 插件与 tailwind standalone 二进制（仅改样式时）
+/internal/shared/ui/assets/htmx.min.js
+/web/.cache/

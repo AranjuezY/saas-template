@@ -6,7 +6,7 @@
 ```
 浏览器 ──HTTP──> server ──读──> SQLite
                   │
-                  └─写/信号─> Temporal Server
+                  └─写/更新─> Temporal Server
                                 ├─> workflow-worker   编排（确定性，不碰库）
                                 └─> resources-worker  副作用（activity → store）
 ```
@@ -73,6 +73,31 @@ go run ./cmd/server                                         # 终端 2：应用 
 ```
 
 环境变量：`ADDR`、`DB_PATH`（默认 data/app.db）、`TEMPORAL_ADDRESS`（默认 localhost:7233）、`TEMPORAL_NAMESPACE`（默认 default）。
+
+## 前端（web/）：零 Node，库不入库
+
+样式 = daisyUI 5 组件类 + Tailwind v4 按需工具类；交互 = htmx（HTML over the
+wire，无客户端应用）。**仓库不提交任何第三方库**——现成的东西由脚本按
+版本 + SHA256 拉取，产物提交入库：
+
+```bash
+web/setup.sh     # clone 后唯一必做：拉 htmx（51KB，go:embed 依赖）
+web/build.sh     # 仅改样式时：拉 daisyUI 插件 + tailwind standalone CLI 并构建
+```
+
+| 内容 | 位置 | 入库？ |
+| --- | --- | --- |
+| 样式源（`app.css`：主题/扫描源声明） | `web/` | ✓ |
+| 构建产物 `app.css`（约 54KB，gzip 后 9KB） | `internal/shared/ui/assets/` | ✓（与 `*_templ.go` 同一哲学） |
+| htmx 运行时库 / daisyUI 插件 / tailwind standalone 二进制 | 本地缓存（gitignore） | ✗ 按需拉取 |
+
+两个已知坑（`app.css` 注释里也有）：
+
+- 必须保留 `@import "tailwindcss" source(none)` 并显式声明
+  `@source "../internal/"`——自动源检测会把缓存目录里的 daisyUI 源文件
+  也当模板扫描，产物从 54KB 膨胀到 376KB；
+- htmx.min.js 被 gitignore 后，Tailwind 扫描同样会跳过它（v4 尊重
+  .gitignore）——这是刻意的：压缩 JS 里的普通单词会污染工具类候选集。
 
 ## CI 检查（.github/workflows/ci.yml）
 

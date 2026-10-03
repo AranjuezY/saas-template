@@ -3,6 +3,8 @@
 package ui
 
 import (
+	"embed"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -11,6 +13,19 @@ import (
 	"github.com/a-h/templ"
 )
 
+//go:embed assets/app.css assets/htmx.min.js
+var assetsFS embed.FS
+
+// Assets 返回 /assets/ 静态资源（样式与 htmx 均自托管，不依赖 CDN）。
+// 挂载示例：mux.Handle("GET /assets/", ui.Assets())。
+func Assets() http.Handler {
+	sub, err := fs.Sub(assetsFS, "assets")
+	if err != nil {
+		panic(err) // embed 路径在编译期固定，出错即程序错误
+	}
+	return http.StripPrefix("/assets/", http.FileServer(http.FS(sub)))
+}
+
 // Toast 类型。
 const (
 	ToastSuccess = "success"
@@ -18,15 +33,15 @@ const (
 	ToastInfo    = "info"
 )
 
-// ToastClass 返回 toast 的样式。
+// ToastClass 返回 toast 的样式（daisyUI alert 语义类）。
 func ToastClass(kind string) string {
 	switch kind {
 	case ToastSuccess:
-		return "rounded-lg bg-emerald-600 px-4 py-2 text-white shadow"
+		return "alert alert-success"
 	case ToastError:
-		return "rounded-lg bg-red-600 px-4 py-2 text-white shadow"
+		return "alert alert-error"
 	default:
-		return "rounded-lg bg-neutral-800 px-4 py-2 text-white shadow"
+		return "alert alert-info"
 	}
 }
 
@@ -53,6 +68,20 @@ func Render(w http.ResponseWriter, r *http.Request, status int, component templ.
 	if err := component.Render(r.Context(), w); err != nil {
 		slog.ErrorContext(r.Context(), "render component", "err", err)
 	}
+}
+
+// RenderWithToast 渲染主片段并附带 OOB toast：header 只写一次。
+// 用于"成功路径"——主片段是 htmx 的交换目标，toast 经 hx-swap-oob
+// 追加到 #toasts。与此相对，RenderToast 用于"只有 toast 没有主体"
+// 的路径（htmx 不交换 4xx/5xx 响应体，因此错误反馈也固定返回 200）。
+func RenderWithToast(w http.ResponseWriter, r *http.Request, status int, component templ.Component, kind, message string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	if err := component.Render(r.Context(), w); err != nil {
+		slog.ErrorContext(r.Context(), "render component", "err", err)
+		return
+	}
+	_ = Toast(kind, message).Render(r.Context(), w)
 }
 
 // RenderToast 是 htmx 的错误反馈通道：固定返回 200，提示通过 out-of-band

@@ -1,0 +1,17 @@
+/* 样式入口：Tailwind v4（standalone CLI，免 Node）+ daisyUI 5 插件。
+ *
+ * - 插件与编译器不入库，由 web/build.sh 按版本+SHA256 拉取（同 templ
+ *   generate 的“按需编译器 + 产物提交”哲学）；
+ * - source(none) 必须保留：关掉自动源检测——否则会把 .cache/ 里的
+ *   daisyUI 源文件也当模板扫描，产物从 69KB 膨胀到 376KB；
+ * - 组件类（btn / card / badge / table / toast / alert…）来自 daisyUI，
+ *   工具类按 @source 扫描到的类名生成；
+ * - 主题：light 默认 + dark 跟随系统（prefers-color-scheme，无 JS）。
+ */
+@import "tailwindcss" source(none);
+
+@source "../internal/";
+
+@plugin "./.cache/daisyui/index.js" {
+  themes: light --default, dark --prefersdark;
+}

@@ -1,42 +1,65 @@
 package ui
 
-// Base 是整站 HTML 骨架。派生项目可在此挂自己的静态资源与脚本。
+// Base 是整站 HTML 骨架：自托管样式与 htmx（无 CDN），daisyUI 主题
+// light 默认 + dark 跟随系统。派生项目可在此挂自己的静态资源与脚本。
 templ Base(title string) {
 	<!DOCTYPE html>
-	<html lang="zh-CN">
+	<html lang="zh-CN" data-theme="light">
 		<head>
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>{ title }</title>
+			<link rel="stylesheet" href="/assets/app.css"/>
+			<script src="/assets/htmx.min.js" defer></script>
 		</head>
-		<body class="min-h-screen bg-neutral-50 text-neutral-900 antialiased">
-			{ children... }
+		<body class="min-h-screen bg-base-200">
+			@Navbar()
+			<main class="mx-auto w-full max-w-5xl px-4 py-8">
+				{ children... }
+			</main>
 			<!-- htmx 通过 hx-swap-oob="beforeend:#toasts" 往这里塞提示 -->
-			<div id="toasts" class="fixed bottom-4 right-4 flex flex-col gap-2"></div>
+			<div id="toasts" class="toast toast-end toast-bottom z-50"></div>
 		</body>
 	</html>
 }
 
+// Navbar 顶部导航骨架。派生项目按需扩展右侧槽位。
+templ Navbar() {
+	<header class="navbar sticky top-0 z-40 border-b border-base-300 bg-base-100/90 backdrop-blur">
+		<div class="mx-auto flex w-full max-w-5xl items-center gap-2 px-4">
+			<a href="/" class="flex items-center gap-2 text-sm font-bold tracking-wide">
+				<span class="grid size-6 place-items-center rounded bg-primary text-primary-content">S</span>
+				saas-template
+			</a>
+			<div class="ml-auto text-xs opacity-60">
+				Go · templ · htmx · SQLite · Temporal
+			</div>
+		</div>
+	</header>
+}
+
 // Card 通用内容卡片。
 templ Card(title string) {
-	<section class="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-		if title != "" {
-			<h2 class="mb-3 text-base font-semibold">{ title }</h2>
-		}
-		{ children... }
+	<section class="card bg-base-100 shadow-sm">
+		<div class="card-body">
+			if title != "" {
+				<h2 class="card-title text-base">{ title }</h2>
+			}
+			{ children... }
+		</div>
 	</section>
 }
 
-// Toast 是 out-of-band 提示块。
+// Toast 是 out-of-band 提示块（daisyUI alert）。
 templ Toast(kind string, message string) {
-	<div class={ ToastClass(kind) } hx-swap-oob="beforeend:#toasts" role="status" data-toast>
-		<span class="text-sm font-medium">{ message }</span>
+	<div class={ ToastClass(kind) + " text-sm" } hx-swap-oob="beforeend:#toasts" role="status" data-toast>
+		<span>{ message }</span>
 	</div>
 }
 
 // Spinner 供 hx-indicator 使用。
 templ Spinner(id string) {
-	<span id={ id } class="htmx-indicator inline-block size-3 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-600"></span>
+	<span id={ id } class="htmx-indicator loading loading-spinner loading-xs"></span>
 }
 
 // EmptyState 空数据占位。

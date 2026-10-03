@@ -10,17 +10,19 @@ import (
 // Page 是条目列表的完整页面（view 自带整页；无跨资源组装时不需要 pages 层）。
 templ Page(list []port.Item) {
 	@ui.Base("Items · saas-template") {
-		<main class="mx-auto w-full max-w-4xl px-4 py-8">
+		<div class="mb-4">
 			<h1 class="text-2xl font-bold">Items</h1>
-			<p class="mt-1 text-sm opacity-60">saas-template 示例域：item 生命周期（激活后 7 天有效，到期自动归档，可续期或提前归档）</p>
-			<div class="mt-6 grid items-start gap-6 md:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
-				@Form()
-				@ui.Card("") {
+			<p class="mt-1 text-sm opacity-60">示例域：item 生命周期——激活后 7 天有效，到期自动归档，可续期或提前归档</p>
+		</div>
+		<div class="grid items-start gap-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+			@Form()
+			<div class="card bg-base-100 shadow-sm">
+				<div class="card-body p-0">
 					<div class="overflow-x-auto">
-						<table class="w-full text-sm">
+						<table class="table table-zebra">
 							<thead>
-								<tr class="text-left text-xs uppercase opacity-50">
-									<th class="py-1">标题</th>
+								<tr>
+									<th>标题</th>
 									<th>阶段</th>
 									<th>到期</th>
 									<th>创建时间</th>
@@ -32,9 +34,9 @@ templ Page(list []port.Item) {
 							</tbody>
 						</table>
 					</div>
-				}
+				</div>
 			</div>
-		</main>
+		</div>
 	}
 }
 
@@ -54,18 +56,22 @@ templ Rows(list []port.Item) {
 }
 
 // Row 单行条目记录。启用 / 续期 / 归档在服务端分别映射为对生命周期
-// 流程的三个信号，不会绕过 Temporal 直接改库。
+// 流程的三个更新（Update 同步返回新快照），不会绕过 Temporal 直接改库。
 templ Row(i port.Item) {
-	<tr id={ "item-" + strconv.FormatInt(i.ID, 10) } class="border-t border-neutral-100">
-		<td class="py-2 font-medium">{ i.Title }</td>
-		<td><span class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs">{ StageLabel(i.Stage) }</span></td>
-		<td class="whitespace-nowrap text-xs opacity-70">{ ExpiryLabel(i) }</td>
-		<td class="whitespace-nowrap text-xs opacity-70">{ ui.FormatTime(i.CreatedAt) }</td>
+	<tr id={ "item-" + strconv.FormatInt(i.ID, 10) } class="hover:bg-base-200/60">
+		<td class="font-medium">{ i.Title }</td>
+		<td><span class={ StageBadgeClass(i.Stage) }>{ StageLabel(i.Stage) }</span></td>
+		<td>
+			if i.Stage == port.StageActive && i.ExpiresAt != nil {
+				<span class={ ExpiryBadgeClass(i) }>{ ExpiryLabel(i) }</span>
+			}
+		</td>
+		<td class="whitespace-nowrap text-xs opacity-60">{ ui.FormatTime(i.CreatedAt) }</td>
 		<td class="text-right">
-			<div class="flex justify-end gap-2">
+			<div class="flex justify-end gap-1">
 				if i.Stage == port.StageDraft {
 					<button
-						class="text-xs text-neutral-600 hover:underline"
+						class="btn btn-primary btn-xs"
 						type="button"
 						hx-post={ "/items/" + strconv.FormatInt(i.ID, 10) + "/activate" }
 						hx-target="closest tr"
@@ -76,7 +82,7 @@ templ Row(i port.Item) {
 				}
 				if i.Stage == port.StageActive {
 					<button
-						class="text-xs text-neutral-600 hover:underline"
+						class="btn btn-outline btn-xs"
 						type="button"
 						hx-post={ "/items/" + strconv.FormatInt(i.ID, 10) + "/renew" }
 						hx-target="closest tr"
@@ -85,7 +91,7 @@ templ Row(i port.Item) {
 						续期 7 天
 					</button>
 					<button
-						class="text-xs text-neutral-600 hover:underline"
+						class="btn btn-ghost btn-xs"
 						type="button"
 						hx-post={ "/items/" + strconv.FormatInt(i.ID, 10) + "/archive" }
 						hx-target="closest tr"
@@ -96,7 +102,7 @@ templ Row(i port.Item) {
 					</button>
 				}
 				<button
-					class="text-xs text-red-600 hover:underline"
+					class="btn btn-ghost btn-xs text-error"
 					type="button"
 					hx-delete={ "/items/" + strconv.FormatInt(i.ID, 10) }
 					hx-target="closest tr"
@@ -116,7 +122,7 @@ templ NotFoundPage() {
 		<div class="flex flex-col items-center gap-3 py-24 text-center">
 			<p class="text-5xl font-bold opacity-20">404</p>
 			<p class="font-medium">找不到这个页面</p>
-			<a class="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white hover:bg-neutral-700" href="/">回到列表</a>
+			<a class="btn btn-primary btn-sm" href="/">回到列表</a>
 		</div>
 	}
 }
@@ -133,16 +139,23 @@ templ Form() {
 			hx-indicator="#create-spinner"
 			data-reset-on-success
 		>
-			<label class="flex flex-col gap-1">
-				<span class="text-xs font-medium opacity-70">标题 <span class="text-red-500">*</span></span>
-				<input class="w-full rounded border border-neutral-300 px-2 py-1 text-sm" type="text" name="title" required maxlength="128" placeholder="做什么"/>
+			<label class="form-control">
+				<div class="label py-1"><span class="label-text">标题 <span class="text-error">*</span></span></div>
+				<input
+					class="input input-bordered input-sm w-full"
+					type="text"
+					name="title"
+					required
+					maxlength="128"
+					placeholder="做什么"
+				/>
 			</label>
 			<div class="flex items-center gap-2">
-				<button class="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white hover:bg-neutral-700" type="submit">
+				<button class="btn btn-primary btn-sm" type="submit">
 					@ui.Spinner("create-spinner")
 					添加
 				</button>
-				<button class="text-sm opacity-60 hover:opacity-100" type="reset">清空</button>
+				<button class="btn btn-ghost btn-sm" type="reset">清空</button>
 			</div>
 		</form>
 	}

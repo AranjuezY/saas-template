@@ -54,9 +54,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = view.Rows(list).Render(ctx, w)
-	view.SuccessToast(w, r, "已添加 "+created.Item.Title+"，激活后开始计有效期")
+	view.RowsWithToast(w, r, list, "已添加 "+created.Item.Title+"，激活后开始计有效期")
 }
 
 // activate 启用条目：UpdateWithStart 激活流程实例（不存在时自动拉起），
@@ -81,9 +79,7 @@ func (h *Handler) activate(w http.ResponseWriter, r *http.Request) {
 
 	// 重复激活返回的快照不含资料字段（title 在库里），渲染前回读全量行。
 	i := h.freshRow(ctx, current.ID, out.Item)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = view.Row(i).Render(ctx, w)
-	view.SuccessToast(w, r, i.Title+" 已启用，"+view.ExpiryLabel(i))
+	view.RowWithToast(w, r, i, i.Title+" 已启用，"+view.ExpiryLabel(i))
 }
 
 // renew 续期：流程把到期时间顺延一个有效期，同步返回新快照。
@@ -110,9 +106,7 @@ func (h *Handler) renew(w http.ResponseWriter, r *http.Request) {
 	}
 
 	i := h.freshRow(ctx, current.ID, out.Item)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = view.Row(i).Render(ctx, w)
-	view.SuccessToast(w, r, i.Title+" 已续期，"+view.ExpiryLabel(i))
+	view.RowWithToast(w, r, i, i.Title+" 已续期，"+view.ExpiryLabel(i))
 }
 
 // archive 提前归档：流程进入终态并结束，同步返回新快照。
@@ -135,9 +129,7 @@ func (h *Handler) archive(w http.ResponseWriter, r *http.Request) {
 	}
 
 	i := h.freshRow(ctx, current.ID, out.Item)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = view.Row(i).Render(ctx, w)
-	view.SuccessToast(w, r, i.Title+" 已归档")
+	view.RowWithToast(w, r, i, i.Title+" 已归档")
 }
 
 // delete 删除的合规形态（Entity decommission）：
@@ -170,7 +162,6 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	view.SuccessToast(w, r, "已删除，生命周期流程已随之结束")
 }
 

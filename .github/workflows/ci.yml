@@ -15,6 +15,11 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # 0. 前端第三方资产（htmx 经 go:embed 参与 go build；
+      #    版本+SHA256 锁定，仓库不提交现成库，见 web/setup.sh）
+      - name: fetch web assets
+        run: web/setup.sh
+
       # 1. 生成物与提交一致（templ + resgen generate 后无 diff）
       - name: generate (drift check)
         run: |
