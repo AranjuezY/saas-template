@@ -15,6 +15,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          # 自建 Gitea runner 的 cache 服务不可达，会黑洞挂起；关掉不影响正确性
+          cache: false
 
       # 0. 前端第三方资产（htmx 经 go:embed 参与 go build；
       #    版本+SHA256 锁定，仓库不提交现成库，见 web/setup.sh）
