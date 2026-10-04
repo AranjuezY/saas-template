@@ -1,0 +1,30 @@
+# 部署编排：SQLite 业务数据落在命名卷，Temporal 复用宿主机上的既有栈（7233）。
+# 镜像由流水线（.github/workflows/deploy.yml）预先 build 好；本文件只负责运行。
+
+services:
+  app:
+    image: saas-template:latest
+    container_name: saas-template
+    ports:
+      - "8090:8090"
+    environment:
+      ADDR: ":8090"
+      DB_PATH: "/app/data/app.db"
+      TEMPORAL_ADDRESS: "host.docker.internal:7233"
+      TEMPORAL_NAMESPACE: "saas-template"
+    extra_hosts:
+      # Docker 20.10+：把宿主机网关注册为可解析名
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - saas-template-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      # debian-slim 无 curl/wget，用 bash 的 /dev/tcp 探测 /healthz
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8090 && printf 'GET /healthz HTTP/1.0\r\n\r\n' >&3 && grep -q ok <&3"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  saas-template-data:

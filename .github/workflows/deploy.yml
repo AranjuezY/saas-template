@@ -1,0 +1,44 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    # 仅自建 Gitea（owner=yuweijian）部署；GitHub 上同名仓库只跑 ci 不部署
+    if: github.repository_owner == 'yuweijian'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建镜像
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          docker build \
+            --build-arg GOIMAGE=docker.xuanyuan.run/library/golang:1.26-bookworm \
+            --build-arg RUNTIMEIMAGE=docker.xuanyuan.run/library/debian:bookworm-slim \
+            --build-arg GOPROXY=https://goproxy.cn,direct \
+            -t saas-template:latest \
+            -t saas-template:${SHA} .
+
+      - name: 注册 Temporal namespace（幂等）
+        run: |
+          docker run --rm --network bridge --entrypoint temporal \
+            hrm-offline/temporalio/admin-tools:latest \
+            operator namespace create --namespace saas-template \
+            --address 172.17.0.1:7233 || true
+
+      - name: 部署（重建容器，数据卷保留）
+        run: docker compose -f deploy/compose.yml up -d
+
+      - name: 健康检查
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://172.17.0.1:8090/healthz; then echo; exit 0; fi
+            sleep 2
+          done
+          echo "健康检查失败，最近日志："
+          docker logs --tail 30 saas-template
+          exit 1
