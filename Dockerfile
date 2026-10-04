@@ -14,17 +14,14 @@ WORKDIR /src
 
 # 先拷贝模块定义，利用层缓存下载依赖
 COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download
+RUN go mod download
 
 COPY . .
 
 # htmx（版本 + SHA256 锁定，仓库不提交现成库，见 web/setup.sh）
 RUN ./web/setup.sh
 
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    go build -trimpath -ldflags "-s -w" -o /out/server ./cmd/server
+RUN go build -trimpath -ldflags "-s -w" -o /out/server ./cmd/server
 
 # 运行时：零包安装，纯拷贝二进制（CGO 关闭，静态链接）
 ARG RUNTIMEIMAGE=debian:bookworm-slim
