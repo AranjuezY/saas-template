@@ -2,6 +2,7 @@
 # 基础镜像走 ARG，便于在国内服务器上用镜像仓库覆盖（见 .github/workflows/deploy.yml）。
 
 ARG GOIMAGE=golang:1.26-bookworm
+ARG RUNTIMEIMAGE=debian:bookworm-slim
 FROM ${GOIMAGE} AS build
 
 # 依赖代理同样可覆盖；默认官方源
@@ -24,7 +25,6 @@ RUN ./web/setup.sh
 RUN go build -trimpath -ldflags "-s -w" -o /out/server ./cmd/server
 
 # 运行时：零包安装，纯拷贝二进制（CGO 关闭，静态链接）
-ARG RUNTIMEIMAGE=debian:bookworm-slim
 FROM ${RUNTIMEIMAGE}
 WORKDIR /app
 COPY --from=build /out/server /app/server
