@@ -13,12 +13,27 @@
 
 ## 从模板派生新项目
 
+方式一：**gonew**（模板公开镜像可达时最省事）：
+
 ```bash
 go run golang.org/x/tools/cmd/gonew@latest github.com/AranjuezY/saas-template example.com/you/yourapp
 cd yourapp
 ```
 
-gonew 会重写全部 import 路径（包括 go:generate 指令里的相对路径不受影响）。
+方式二：**clone + 重写**（任意 Git 服务可用，含私有仓库/自建 Gitea）：
+
+```bash
+git clone <模板仓库URL> myapp && cd myapp
+# 全量重写模块路径：import（*.go / *.templ）+ go.mod 声明
+grep -rl 'github.com/AranjuezY/saas-template' --include='*.go' --include='*.templ' --include='go.mod' . \
+  | xargs perl -pi -e 's|github\.com/AranjuezY/saas-template|example.com/you/myapp|g'
+rm -rf .git && git init    # 与模板历史切割，从头积累自己的提交
+web/setup.sh               # 拉前端资产（clone 后唯一必做）
+go build ./...             # 验证
+```
+
+两种方式等价：go:generate 指令与 resgen 规格全部是相对路径，不受重写影响。
+
 派生后做三件事：
 
 1. 用 resgen 建首个资源（见下），替换 `internal/example` 为你的域
