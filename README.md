@@ -106,6 +106,29 @@ web/build.sh     # 仅改样式时：拉 daisyUI 插件 + tailwind standalone CL
 3. `workflowcheck ./internal/...` —— workflow 确定性（禁 time.Now / IO 等）
 4. `go vet` + `go build` + `go test` —— 测试用假编排，不需要 Temporal Server
 
+## 自动部署（.github/workflows/deploy.yml）
+
+自建 Gitea 上 push `main` → CI 全绿后自动 `docker build` + `compose up`
+（SQLite 落命名卷，重部署不丢数据），最后 `/healthz` 健康检查。Temporal 复用
+宿主机既有栈，namespace 由流水线幂等注册。GitHub 上同仓库**只跑 CI 不部署**
+（deploy.yml 按 owner 判断跳过）。注意：进程启动即校验 Temporal 连接，
+Temporal 不可达时容器会重启循环、恢复后自愈。
+
+**派生新项目时改 4 处专属配置**（不改会与本模板互相覆盖）：
+
+| 位置 | 改什么 |
+| --- | --- |
+| `deploy.yml` + `deploy/compose.yml` | 镜像名 / 容器名 `saas-template` → 项目名 |
+| `deploy/compose.yml` | 端口 `8090`（同机多项目需错开） |
+| `deploy.yml` + `deploy/compose.yml` | Temporal namespace → 项目名 |
+
+回滚：每次部署保留 sha 标签镜像，`docker tag <旧sha> saas-template:latest`
+后重新 `compose up -d` 即可。
+
+其余为**机器相关一次性配置**（换服务器才动）：`deploy.yml` 里的镜像仓库源
+与 admin-tools 镜像、Dockerfile 的 `GOIMAGE`/`RUNTIMEIMAGE` 覆盖参数；
+runner 侧的 act-job 镜像与 toolcache 缓存卷需随 Go 版本同步升级。
+
 ## 给 AI 的约束
 
 见 [AGENTS.md](AGENTS.md)：资源规格、分层约定、判断规则、不变量与已知陷阱。
